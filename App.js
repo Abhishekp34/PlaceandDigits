@@ -1,27 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, FlatList, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
 import { supabase } from './supabase'; 
-import { Ionicons } from '@expo/vector-icons'; // Ensure you have expo vector icons (standard in expo)
 
 // --- THEME COLORS ---
 const THEME = {
-  bg: '#121212',        // Very dark background
-  card: '#1E1E1E',      // Slightly lighter for cards
-  text: '#FFFFFF',      // White text
-  textDim: '#AAAAAA',   // Gray text
-  primary: '#0A84FF',   // iOS Blue
-  success: '#30D158',   // iOS Green
-  danger: '#FF453A',    // iOS Red
-  inputBg: '#2C2C2E',   // Dark Gray for inputs
+  bg: '#121212',        // Deep Black/Navy
+  card: '#1E1E1E',      // Dark Gray Cards
+  text: '#FFFFFF',      // White Text
+  textDim: '#AAAAAA',   // Dimmed Text
+  primary: '#0A84FF',   // Blue
+  success: '#30D158',   // Green
+  danger: '#FF453A',    // Red
+  inputBg: '#2C2C2E',   // Input Background
 };
 
 export default function App() {
   // --- AUTH & APP STATES ---
   const [session, setSession] = useState(null);
   const [username, setUsername] = useState('');
-  const [hasSavedName, setHasSavedName] = useState(false); // Controls Input vs Text display
+  const [hasSavedName, setHasSavedName] = useState(false);
   
-  const [screen, setScreen] = useState('menu'); 
+  const [screen, setScreen] = useState('menu'); // 'menu', 'game', 'leaderboard'
   const [difficulty, setDifficulty] = useState(4);
 
   // --- GAME STATES ---
@@ -37,7 +36,7 @@ export default function App() {
   // --- DATA STATES ---
   const [myHistory, setMyHistory] = useState([]); 
   const [leaders, setLeaders] = useState([]);
-  const [leaderboardType, setLeaderboardType] = useState('time');
+  const [leaderboardType, setLeaderboardType] = useState('time'); // 'time' or 'guesses'
   const [loading, setLoading] = useState(false);
 
   // -------------------------
@@ -67,7 +66,7 @@ export default function App() {
     const { data } = await supabase.from('profiles').select('username').eq('id', userId).single();
     if (data && data.username) {
       setUsername(data.username);
-      setHasSavedName(true); // <--- LOCKS THE NAME DISPLAY
+      setHasSavedName(true);
     }
   };
 
@@ -75,7 +74,7 @@ export default function App() {
     if (!session || !username.trim()) return;
     const { error } = await supabase.from('profiles').upsert({ id: session.user.id, username: username });
     if (!error) {
-      setHasSavedName(true); // Hide input, show text
+      setHasSavedName(true);
     }
   };
 
@@ -93,25 +92,34 @@ export default function App() {
     if (data) setMyHistory(data);
   };
 
-  const fetchLeaderboard = async () => {
+  // FIXED: Now accepts selectedType to fix sorting bug
+  const fetchLeaderboard = async (selectedType) => {
+    // SAFETY: Use passed type if it's a string, otherwise use state
+    const sortType = (typeof selectedType === 'string') ? selectedType : leaderboardType;
+    
     setScreen('leaderboard');
     setLoading(true);
+    
     let query = supabase
       .from('leaderboards')
       .select(`difficulty, time_seconds, guesses_count, profiles!user_id (username)`)
-      .eq('difficulty', difficulty)
-      .limit(20);
+      .eq('difficulty', difficulty);
 
-    if (leaderboardType === 'time') query = query.order('time_seconds', { ascending: true });
-    else query = query.order('guesses_count', { ascending: true });
+    // ORDER MUST BE APPLIED BEFORE LIMIT
+    if (sortType === 'time') {
+      query = query.order('time_seconds', { ascending: true });
+    } else {
+      query = query.order('guesses_count', { ascending: true });
+    }
 
-    const { data } = await query;
+    const { data } = await query.limit(20);
+
     if (data) setLeaders(data);
     setLoading(false);
   };
 
   // -------------------------
-  // 3. GAME LOGIC
+  // 3. GAME LOGIC (Place & Digit)
   // -------------------------
   const generateUniqueNumber = (length) => {
     let digits = [];
@@ -128,7 +136,7 @@ export default function App() {
       return;
     }
     const newTarget = generateUniqueNumber(difficulty);
-    console.log("Secret:", newTarget); 
+    console.log("Secret (Dev):", newTarget); 
 
     setTargetNumber(newTarget);
     setGuessesCount(0);
@@ -246,7 +254,14 @@ export default function App() {
               <Text style={styles.btnText}>Start Game</Text>
             </TouchableOpacity>
             
-            <TouchableOpacity onPress={fetchLeaderboard} style={{marginTop: 20}}>
+            {/* FIXED: Explicitly passing 'time' to fix sorting bug */}
+            <TouchableOpacity 
+              onPress={() => {
+                setLeaderboardType('time');
+                fetchLeaderboard('time');
+              }} 
+              style={{marginTop: 20}}
+            >
               <Text style={styles.linkText}>View Global Leaderboard</Text>
             </TouchableOpacity>
           </View>
@@ -335,14 +350,30 @@ export default function App() {
         <View style={styles.listContainer}>
           <Text style={styles.subTitle}>Global Top 20 ({difficulty} Digits)</Text>
           <View style={styles.tabRow}>
-            <TouchableOpacity style={[styles.tab, leaderboardType === 'time' && styles.activeTab]} onPress={() => { setLeaderboardType('time'); fetchLeaderboard(); }}>
+            {/* FIXED: Explicitly passing 'time' */}
+            <TouchableOpacity 
+              style={[styles.tab, leaderboardType === 'time' && styles.activeTab]} 
+              onPress={() => { 
+                setLeaderboardType('time'); 
+                fetchLeaderboard('time'); 
+              }}
+            >
               <Text style={styles.tabText}>Fastest</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.tab, leaderboardType === 'guesses' && styles.activeTab]} onPress={() => { setLeaderboardType('guesses'); fetchLeaderboard(); }}>
+
+            {/* FIXED: Explicitly passing 'guesses' */}
+            <TouchableOpacity 
+              style={[styles.tab, leaderboardType === 'guesses' && styles.activeTab]} 
+              onPress={() => { 
+                setLeaderboardType('guesses'); 
+                fetchLeaderboard('guesses'); 
+              }}
+            >
               <Text style={styles.tabText}>Fewest Tries</Text>
             </TouchableOpacity>
           </View>
-          {loading ? <ActivityIndicator color={THEME.primary} /> : (
+
+          {loading ? <ActivityIndicator color={THEME.primary} size="large" /> : (
             <FlatList
               data={leaders}
               keyExtractor={(item, index) => index.toString()}
@@ -364,21 +395,21 @@ export default function App() {
   );
 }
 
-// --- DARK THEME STYLES ---
+// --- STYLES ---
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: THEME.bg, paddingTop: 60 },
   mainContainer: { flex: 1, paddingHorizontal: 20 },
   header: { alignItems: 'center', marginBottom: 20 },
   title: { fontSize: 32, fontWeight: '900', color: THEME.text, letterSpacing: 1 },
   
-  // Welcome Section
+  // Welcome
   welcomeSection: { marginBottom: 30, alignItems: 'center' },
   welcomeText: { fontSize: 20, color: THEME.textDim },
   usernameHighlight: { color: THEME.text, fontWeight: 'bold' },
   editLink: { color: THEME.primary, fontSize: 14, marginTop: 5 },
   nameInputRow: { flexDirection: 'row', width: '100%', gap: 10 },
   
-  // Inputs & Buttons
+  // Inputs/Buttons
   input: { flex: 1, backgroundColor: THEME.inputBg, color: THEME.text, padding: 15, borderRadius: 12, fontSize: 16 },
   saveBtn: { backgroundColor: THEME.primary, justifyContent: 'center', paddingHorizontal: 20, borderRadius: 12 },
   
@@ -391,7 +422,7 @@ const styles = StyleSheet.create({
   diffText: { fontSize: 20, fontWeight:'bold', color: THEME.textDim },
   activeText: { color: '#FFF' },
   
-  startButton: { backgroundColor: THEME.success, paddingVertical: 18, width: '100%', alignItems:'center', borderRadius: 16, shadowColor: THEME.success, shadowOpacity: 0.3, shadowRadius: 10 },
+  startButton: { backgroundColor: THEME.success, paddingVertical: 18, width: '100%', alignItems:'center', borderRadius: 16 },
   btnText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
   btnTextSmall: { color: '#FFF', fontSize: 16, fontWeight: '600' },
   linkText: { color: THEME.primary, fontSize: 16, fontWeight: '600' },
