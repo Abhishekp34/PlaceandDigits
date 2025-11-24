@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, FlatList, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, StatusBar, Keyboard } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, FlatList, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, StatusBar, Keyboard, InputAccessoryView } from 'react-native';
 import { supabase } from './supabase'; 
 import ConfettiCannon from 'react-native-confetti-cannon'; 
+import * as Haptics from 'expo-haptics'; // <--- NEW IMPORT
 
 const THEME = {
   bg: '#121212', card: '#1E1E1E', text: '#FFFFFF', textDim: '#AAAAAA', 
@@ -106,9 +107,21 @@ export default function App() {
     setGameTimer(timer);
   };
 
-  const handleGuess = () => {
-    if (currentGuess.length !== difficulty) { Alert.alert("Invalid", `Enter ${difficulty} digits.`); return; }
-    if (new Set(currentGuess).size !== currentGuess.length) { Alert.alert("Invalid", "Digits must be UNIQUE."); return; }
+  const handleGuess = async () => {
+    // VALIDATION
+    if (currentGuess.length !== difficulty) { 
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); // Error Vibrate
+      Alert.alert("Invalid", `Enter ${difficulty} digits.`); 
+      return; 
+    }
+    if (new Set(currentGuess).size !== currentGuess.length) { 
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); // Error Vibrate
+      Alert.alert("Invalid", "Digits must be UNIQUE."); 
+      return; 
+    }
+
+    // SUCCESSFUL SUBMISSION VIBRATION
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     const newCount = guessesCount + 1;
     setGuessesCount(newCount);
@@ -131,6 +144,10 @@ export default function App() {
     if (places === difficulty) {
       clearInterval(gameTimer);
       setIsGameWon(true);
+      
+      // WINNING VIBRATION
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      
       saveScore(newCount, timeTaken);
       Keyboard.dismiss(); 
     }
@@ -145,7 +162,17 @@ export default function App() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" /> 
 
-      {/* CONFETTI - Only renders when game is won */}
+      {/* --- IOS KEYBOARD BAR (Re-added) --- */}
+      {Platform.OS === 'ios' && (
+        <InputAccessoryView nativeID="GuessAccessory">
+          <View style={styles.accessoryBar}>
+            <TouchableOpacity style={styles.accessoryButton} onPress={handleGuess}>
+              <Text style={styles.accessoryText}>SUBMIT GUESS</Text>
+            </TouchableOpacity>
+          </View>
+        </InputAccessoryView>
+      )}
+
       {isGameWon && (
         <ConfettiCannon count={200} origin={{x: -10, y: 0}} fadeOut={true} />
       )}
@@ -209,7 +236,6 @@ export default function App() {
       {screen === 'game' && (
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.gameContainer}>
           
-          {/* 1. PLAYING STATE */}
           {!isGameWon ? (
             <>
               <View style={styles.statsRow}>
@@ -224,15 +250,17 @@ export default function App() {
                   style={styles.gameInput} 
                   placeholder="?" placeholderTextColor="#555" keyboardType="numeric"
                   maxLength={difficulty} value={currentGuess} onChangeText={setCurrentGuess}
-                  onSubmitEditing={handleGuess} returnKeyType="done" autoFocus
+                  onSubmitEditing={handleGuess} 
+                  // --- LINK TO ACCESSORY BAR ---
+                  inputAccessoryViewID="GuessAccessory"
+                  // -----------------------------
+                  returnKeyType="done" autoFocus
                 />
-                <TouchableOpacity style={styles.guessBtn} onPress={handleGuess}><Text style={styles.btnText}>Go</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.guessBtn} onPress={handleGuess}><Text style={styles.btnText}>Guess</Text></TouchableOpacity>
               </View>
               <TouchableOpacity style={styles.quitBtn} onPress={() => { clearInterval(gameTimer); setScreen('menu'); }}><Text style={{color: THEME.danger}}>Quit Game</Text></TouchableOpacity>
             </>
           ) : (
-            
-            // 2. WON STATE (New Design)
             <View style={styles.wonContainer}>
                 <Text style={styles.celebrationText}>HOORAY!</Text>
                 <Text style={styles.wonTitle}>YOU WON!</Text>
@@ -251,7 +279,6 @@ export default function App() {
             </View>
           )}
 
-          {/* HISTORY LIST (Visible in both states) */}
           <View style={styles.historySectionGame}>
              <FlatList
               data={history}
@@ -343,7 +370,12 @@ const styles = StyleSheet.create({
   gameInput: { backgroundColor: THEME.inputBg, color: THEME.text, fontSize: 28, width: 150, textAlign: 'center', padding: 15, borderRadius: 16, letterSpacing: 4, fontWeight: 'bold' },
   guessBtn: { backgroundColor: THEME.primary, justifyContent: 'center', paddingHorizontal: 25, borderRadius: 16 },
   
-  // WON SCREEN STYLES
+  // --- BLUE BAR STYLE ---
+  accessoryBar: { backgroundColor: THEME.primary, padding: 12, alignItems: 'center', justifyContent: 'center' },
+  accessoryButton: { width: '100%', alignItems: 'center' },
+  accessoryText: { color: '#FFF', fontWeight: 'bold', fontSize: 18, letterSpacing: 1 },
+  // ----------------------
+
   wonContainer: { alignItems: 'center', marginBottom: 20, width: '100%' },
   celebrationText: { fontSize: 20, color: THEME.textDim, marginBottom: 5, letterSpacing: 2 },
   wonTitle: { fontSize: 36, fontWeight: '900', color: THEME.success, marginBottom: 15 },
