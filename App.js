@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, FlatList, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, StatusBar, Keyboard, InputAccessoryView } from 'react-native';
 import { supabase } from './supabase'; 
 import ConfettiCannon from 'react-native-confetti-cannon'; 
-import * as Haptics from 'expo-haptics'; // <--- NEW IMPORT
+import * as Haptics from 'expo-haptics'; 
 
 const THEME = {
   bg: '#121212', card: '#1E1E1E', text: '#FFFFFF', textDim: '#AAAAAA', 
@@ -57,10 +57,15 @@ export default function App() {
     }
   };
 
+  // Updated: Returns true if successful so startGame knows to proceed
   const saveUsername = async () => {
-    if (!session || !username.trim()) return;
+    if (!session || !username.trim()) return false;
     const { error } = await supabase.from('profiles').upsert({ id: session.user.id, username: username });
-    if (!error) setHasSavedName(true);
+    if (!error) {
+      setHasSavedName(true);
+      return true;
+    }
+    return false;
   };
 
   const fetchMyHistory = async (userId = session?.user?.id) => {
@@ -90,8 +95,24 @@ export default function App() {
     return digits.join('');
   };
 
-  const startGame = () => {
-    if (!hasSavedName) { Alert.alert("Name Required", "Please enter your name to start!"); return; }
+  // --- NEW START GAME LOGIC ---
+  const startGame = async () => {
+    // 1. Check if name is empty
+    if (!username.trim()) { 
+      Alert.alert("Name Required", "Please enter your name to start!"); 
+      return; 
+    }
+
+    // 2. Auto-Save Logic (Background)
+    if (!hasSavedName) {
+      const success = await saveUsername();
+      if (!success) {
+         Alert.alert("Error", "Could not save name. Check connection.");
+         return;
+      }
+    }
+
+    // 3. Start Game
     const newTarget = generateUniqueNumber(difficulty);
     console.log("Secret:", newTarget); 
     setTargetNumber(newTarget);
@@ -108,19 +129,17 @@ export default function App() {
   };
 
   const handleGuess = async () => {
-    // VALIDATION
     if (currentGuess.length !== difficulty) { 
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); // Error Vibrate
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); 
       Alert.alert("Invalid", `Enter ${difficulty} digits.`); 
       return; 
     }
     if (new Set(currentGuess).size !== currentGuess.length) { 
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); // Error Vibrate
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); 
       Alert.alert("Invalid", "Digits must be UNIQUE."); 
       return; 
     }
 
-    // SUCCESSFUL SUBMISSION VIBRATION
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     const newCount = guessesCount + 1;
@@ -144,10 +163,7 @@ export default function App() {
     if (places === difficulty) {
       clearInterval(gameTimer);
       setIsGameWon(true);
-      
-      // WINNING VIBRATION
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      
       saveScore(newCount, timeTaken);
       Keyboard.dismiss(); 
     }
@@ -162,7 +178,7 @@ export default function App() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" /> 
 
-      {/* --- IOS KEYBOARD BAR (Re-added) --- */}
+      {/* IOS TOOLBAR */}
       {Platform.OS === 'ios' && (
         <InputAccessoryView nativeID="GuessAccessory">
           <View style={styles.accessoryBar}>
@@ -185,16 +201,24 @@ export default function App() {
       {/* MENU */}
       {screen === 'menu' && (
         <View style={styles.mainContainer}>
+          
           <View style={styles.welcomeSection}>
             {hasSavedName ? (
+              // 1. SAVED STATE (Show Name + Edit)
               <View style={styles.nameDisplayRow}>
                 <Text style={styles.welcomeText}>Welcome, <Text style={styles.usernameHighlight}>{username}</Text></Text>
                 <TouchableOpacity onPress={() => setHasSavedName(false)}><Text style={styles.editLink}>Edit</Text></TouchableOpacity>
               </View>
             ) : (
+              // 2. UNSAVED STATE (Just Input, No Save Button)
               <View style={styles.nameInputRow}>
-                <TextInput style={styles.input} placeholder="Enter your Name" placeholderTextColor="#777" value={username} onChangeText={setUsername} />
-                <TouchableOpacity style={styles.saveBtn} onPress={saveUsername}><Text style={styles.btnTextSmall}>Save</Text></TouchableOpacity>
+                <TextInput 
+                  style={styles.input} 
+                  placeholder="Enter your Name" 
+                  placeholderTextColor="#777" 
+                  value={username} 
+                  onChangeText={setUsername} 
+                />
               </View>
             )}
           </View>
@@ -208,7 +232,10 @@ export default function App() {
                 </TouchableOpacity>
               ))}
             </View>
+            
+            {/* START BUTTON NOW HANDLES SAVING */}
             <TouchableOpacity style={styles.startButton} onPress={startGame}><Text style={styles.btnText}>Start Game</Text></TouchableOpacity>
+            
             <TouchableOpacity onPress={() => { setLeaderboardType('time'); fetchLeaderboard('time'); }} style={{marginTop: 20}}>
               <Text style={styles.linkText}>View Global Leaderboard</Text>
             </TouchableOpacity>
@@ -250,13 +277,10 @@ export default function App() {
                   style={styles.gameInput} 
                   placeholder="?" placeholderTextColor="#555" keyboardType="numeric"
                   maxLength={difficulty} value={currentGuess} onChangeText={setCurrentGuess}
-                  onSubmitEditing={handleGuess} 
-                  // --- LINK TO ACCESSORY BAR ---
-                  inputAccessoryViewID="GuessAccessory"
-                  // -----------------------------
+                  onSubmitEditing={handleGuess} inputAccessoryViewID="GuessAccessory"
                   returnKeyType="done" autoFocus
                 />
-                <TouchableOpacity style={styles.guessBtn} onPress={handleGuess}><Text style={styles.btnText}>Guess</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.guessBtn} onPress={handleGuess}><Text style={styles.btnText}>Go</Text></TouchableOpacity>
               </View>
               <TouchableOpacity style={styles.quitBtn} onPress={() => { clearInterval(gameTimer); setScreen('menu'); }}><Text style={{color: THEME.danger}}>Quit Game</Text></TouchableOpacity>
             </>
@@ -361,7 +385,6 @@ const styles = StyleSheet.create({
   historyBadge: { backgroundColor: '#333', width: 30, height: 30, borderRadius: 15, alignItems:'center', justifyContent:'center'},
   historyBadgeText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
   historyCardText: { fontSize: 16, color: THEME.text, fontWeight:'600' },
-  
   gameContainer: { flex: 1, padding: 20, alignItems: 'center' },
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 20 },
   statText: { fontSize: 18, fontWeight: 'bold', color: THEME.textDim },
@@ -369,23 +392,17 @@ const styles = StyleSheet.create({
   inputSection: { flexDirection: 'row', gap: 10, marginBottom: 20 },
   gameInput: { backgroundColor: THEME.inputBg, color: THEME.text, fontSize: 28, width: 150, textAlign: 'center', padding: 15, borderRadius: 16, letterSpacing: 4, fontWeight: 'bold' },
   guessBtn: { backgroundColor: THEME.primary, justifyContent: 'center', paddingHorizontal: 25, borderRadius: 16 },
-  
-  // --- BLUE BAR STYLE ---
   accessoryBar: { backgroundColor: THEME.primary, padding: 12, alignItems: 'center', justifyContent: 'center' },
   accessoryButton: { width: '100%', alignItems: 'center' },
   accessoryText: { color: '#FFF', fontWeight: 'bold', fontSize: 18, letterSpacing: 1 },
-  // ----------------------
-
   wonContainer: { alignItems: 'center', marginBottom: 20, width: '100%' },
   celebrationText: { fontSize: 20, color: THEME.textDim, marginBottom: 5, letterSpacing: 2 },
   wonTitle: { fontSize: 36, fontWeight: '900', color: THEME.success, marginBottom: 15 },
   wonNumber: { fontSize: 48, fontWeight: 'bold', color: THEME.gold, marginBottom: 20, letterSpacing: 5 },
   wonStatsRow: { flexDirection: 'row', gap: 10, marginBottom: 30 },
   wonStatItem: { fontSize: 18, color: THEME.text, fontWeight: '600' },
-  
   gameOverRow: { flexDirection: 'row', gap: 15, marginBottom: 10 },
   actionBtn: { backgroundColor: THEME.success, paddingVertical: 15, paddingHorizontal: 25, borderRadius: 12, minWidth: 130, alignItems:'center' },
-  
   historySectionGame: { flex: 1, width: '100%', marginTop: 10 },
   historyList: { width: '100%' },
   historyRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: THEME.card, padding: 16, borderRadius: 12, marginBottom: 10 },
