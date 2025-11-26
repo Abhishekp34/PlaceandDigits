@@ -18,7 +18,10 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.abhishek.placeanddigits",
       "buildNumber": "1",
-      "userInterfaceStyle": "dark"
+      "userInterfaceStyle": "dark",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -37,7 +40,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": ""
+        "projectId": "f7a387b4-0af3-4b97-adb4-7cb335bb5c83"
       }
     }
   }
