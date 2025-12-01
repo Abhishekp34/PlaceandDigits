@@ -57,15 +57,23 @@ export default function App() {
     }
   };
 
-  // Updated: Returns true if successful so startGame knows to proceed
+  // --- UPDATED: Now returns detailed error types ---
   const saveUsername = async () => {
-    if (!session || !username.trim()) return false;
+    if (!session || !username.trim()) return { success: false, error: 'empty' };
+    
     const { error } = await supabase.from('profiles').upsert({ id: session.user.id, username: username });
-    if (!error) {
-      setHasSavedName(true);
-      return true;
+    
+    if (error) {
+      // Postgres Error 23505 = Unique Violation (Duplicate Key)
+      if (error.code === '23505' || error.message.includes('unique constraint')) {
+        return { success: false, error: 'duplicate' };
+      }
+      console.log("Supabase Error:", error.message);
+      return { success: false, error: 'generic' };
     }
-    return false;
+    
+    setHasSavedName(true);
+    return { success: true };
   };
 
   const fetchMyHistory = async (userId = session?.user?.id) => {
@@ -95,7 +103,7 @@ export default function App() {
     return digits.join('');
   };
 
-  // --- NEW START GAME LOGIC ---
+  // --- UPDATED START GAME LOGIC ---
   const startGame = async () => {
     // 1. Check if name is empty
     if (!username.trim()) { 
@@ -105,9 +113,15 @@ export default function App() {
 
     // 2. Auto-Save Logic (Background)
     if (!hasSavedName) {
-      const success = await saveUsername();
-      if (!success) {
-         Alert.alert("Error", "Could not save name. Check connection.");
+      const result = await saveUsername();
+      
+      if (!result.success) {
+         // HANDLE SPECIFIC ERRORS HERE
+         if (result.error === 'duplicate') {
+           Alert.alert("Username Taken", "That name is already taken. Please choose another one.");
+         } else {
+           Alert.alert("Error", "Could not save name. Check connection.");
+         }
          return;
       }
     }
@@ -178,7 +192,6 @@ export default function App() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" /> 
 
-      {/* IOS TOOLBAR */}
       {Platform.OS === 'ios' && (
         <InputAccessoryView nativeID="GuessAccessory">
           <View style={styles.accessoryBar}>
@@ -193,24 +206,19 @@ export default function App() {
         <ConfettiCannon count={200} origin={{x: -10, y: 0}} fadeOut={true} />
       )}
 
-      {/* HEADER */}
       <View style={styles.header}>
         <Text style={styles.title}>PlaceNDigits</Text>
       </View>
 
-      {/* MENU */}
       {screen === 'menu' && (
         <View style={styles.mainContainer}>
-          
           <View style={styles.welcomeSection}>
             {hasSavedName ? (
-              // 1. SAVED STATE (Show Name + Edit)
               <View style={styles.nameDisplayRow}>
                 <Text style={styles.welcomeText}>Welcome, <Text style={styles.usernameHighlight}>{username}</Text></Text>
                 <TouchableOpacity onPress={() => setHasSavedName(false)}><Text style={styles.editLink}>Edit</Text></TouchableOpacity>
               </View>
             ) : (
-              // 2. UNSAVED STATE (Just Input, No Save Button)
               <View style={styles.nameInputRow}>
                 <TextInput 
                   style={styles.input} 
@@ -232,10 +240,7 @@ export default function App() {
                 </TouchableOpacity>
               ))}
             </View>
-            
-            {/* START BUTTON NOW HANDLES SAVING */}
             <TouchableOpacity style={styles.startButton} onPress={startGame}><Text style={styles.btnText}>Start Game</Text></TouchableOpacity>
-            
             <TouchableOpacity onPress={() => { setLeaderboardType('time'); fetchLeaderboard('time'); }} style={{marginTop: 20}}>
               <Text style={styles.linkText}>View Global Leaderboard</Text>
             </TouchableOpacity>
@@ -259,7 +264,6 @@ export default function App() {
         </View>
       )}
 
-      {/* GAME SCREEN */}
       {screen === 'game' && (
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.gameContainer}>
           
@@ -324,7 +328,6 @@ export default function App() {
         </KeyboardAvoidingView>
       )}
 
-      {/* LEADERBOARD */}
       {screen === 'leaderboard' && (
         <View style={styles.listContainer}>
           <Text style={styles.subTitle}>Global Top 20 ({difficulty} Digits)</Text>
