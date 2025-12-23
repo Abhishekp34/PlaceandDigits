@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, FlatList, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, StatusBar, Keyboard, InputAccessoryView } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, FlatList, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, StatusBar, Keyboard, InputAccessoryView, Modal, ScrollView } from 'react-native';
 import { supabase } from './supabase'; 
 import ConfettiCannon from 'react-native-confetti-cannon'; 
 import * as Haptics from 'expo-haptics'; 
@@ -28,6 +28,9 @@ export default function App() {
   const [leaders, setLeaders] = useState([]);
   const [leaderboardType, setLeaderboardType] = useState('time'); 
   const [loading, setLoading] = useState(false);
+  
+  // --- INSTRUCTIONS STATE ---
+  const [showInstructions, setShowInstructions] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -57,14 +60,12 @@ export default function App() {
     }
   };
 
-  // --- UPDATED: Now returns detailed error types ---
   const saveUsername = async () => {
     if (!session || !username.trim()) return { success: false, error: 'empty' };
     
     const { error } = await supabase.from('profiles').upsert({ id: session.user.id, username: username });
     
     if (error) {
-      // Postgres Error 23505 = Unique Violation (Duplicate Key)
       if (error.code === '23505' || error.message.includes('unique constraint')) {
         return { success: false, error: 'duplicate' };
       }
@@ -103,20 +104,15 @@ export default function App() {
     return digits.join('');
   };
 
-  // --- UPDATED START GAME LOGIC ---
   const startGame = async () => {
-    // 1. Check if name is empty
     if (!username.trim()) { 
       Alert.alert("Name Required", "Please enter your name to start!"); 
       return; 
     }
 
-    // 2. Auto-Save Logic (Background)
     if (!hasSavedName) {
       const result = await saveUsername();
-      
       if (!result.success) {
-         // HANDLE SPECIFIC ERRORS HERE
          if (result.error === 'duplicate') {
            Alert.alert("Username Taken", "That name is already taken. Please choose another one.");
          } else {
@@ -126,7 +122,6 @@ export default function App() {
       }
     }
 
-    // 3. Start Game
     const newTarget = generateUniqueNumber(difficulty);
     console.log("Secret:", newTarget); 
     setTargetNumber(newTarget);
@@ -202,12 +197,58 @@ export default function App() {
         </InputAccessoryView>
       )}
 
+      {/* --- INSTRUCTIONS MODAL --- */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={showInstructions}
+        onRequestClose={() => setShowInstructions(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>How to Play 🧩</Text>
+            <ScrollView style={styles.modalScroll}>
+              <Text style={styles.modalText}>
+                The goal is to guess the hidden secret number.
+              </Text>
+
+              <Text style={styles.ruleHeader}>1. The Rules</Text>
+              <Text style={styles.modalText}>• The number has <Text style={{fontWeight:'bold'}}>{difficulty} digits</Text>.</Text>
+              <Text style={styles.modalText}>• All digits are <Text style={{fontWeight:'bold'}}>UNIQUE</Text> (no duplicates).</Text>
+              <Text style={styles.modalText}>• Digits are between 0-9.</Text>
+
+              <Text style={styles.ruleHeader}>2. The Feedback</Text>
+              <Text style={styles.modalText}>After every guess, you get a hint:</Text>
+              
+              <View style={styles.exampleBox}>
+                <Text style={styles.exampleText}>
+                  🟢 <Text style={{color: THEME.success, fontWeight:'bold'}}>PLACE:</Text> Correct number in the <Text style={{fontStyle:'italic'}}>Correct</Text> spot.
+                </Text>
+                <Text style={styles.exampleText}>
+                  🟡 <Text style={{color: THEME.gold, fontWeight:'bold'}}>DIGIT:</Text> Correct number but in the <Text style={{fontStyle:'italic'}}>Wrong</Text> spot.
+                </Text>
+              </View>
+
+              <Text style={styles.ruleHeader}>3. Example</Text>
+              <Text style={styles.modalText}>Secret Code: <Text style={{fontWeight:'bold'}}>1 2 3 4</Text></Text>
+              <Text style={styles.modalText}>Your Guess: <Text style={{fontWeight:'bold'}}>1 5 6 2</Text></Text>
+              <Text style={styles.modalText}>Result: <Text style={{color: THEME.success}}>1 Place</Text> (the 1) and <Text style={{color: THEME.gold}}>1 Digit</Text> (the 2).</Text>
+            </ScrollView>
+
+            <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setShowInstructions(false)}>
+              <Text style={styles.btnText}>Got it!</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {isGameWon && (
         <ConfettiCannon count={200} origin={{x: -10, y: 0}} fadeOut={true} />
       )}
 
       <View style={styles.header}>
         <Text style={styles.title}>PlaceNDigits</Text>
+        {/* Button removed from here */}
       </View>
 
       {screen === 'menu' && (
@@ -240,7 +281,14 @@ export default function App() {
                 </TouchableOpacity>
               ))}
             </View>
+            
             <TouchableOpacity style={styles.startButton} onPress={startGame}><Text style={styles.btnText}>Start Game</Text></TouchableOpacity>
+            
+            {/* --- NEW BIG HELP BUTTON --- */}
+            <TouchableOpacity style={styles.helpButtonLarge} onPress={() => setShowInstructions(true)}>
+               <Text style={styles.btnText}>❓ How to Play</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity onPress={() => { setLeaderboardType('time'); fetchLeaderboard('time'); }} style={{marginTop: 20}}>
               <Text style={styles.linkText}>View Global Leaderboard</Text>
             </TouchableOpacity>
@@ -364,6 +412,30 @@ const styles = StyleSheet.create({
   mainContainer: { flex: 1, paddingHorizontal: 20 },
   header: { alignItems: 'center', marginBottom: 20 },
   title: { fontSize: 32, fontWeight: '900', color: THEME.text, letterSpacing: 1 },
+  
+  // New styles for the BIG help button
+  helpButtonLarge: {
+    backgroundColor: '#333', // Dark grey background
+    paddingVertical: 15,
+    width: '100%',
+    alignItems: 'center',
+    borderRadius: 16,
+    marginTop: 15, // Space between Start and Help
+    borderWidth: 1,
+    borderColor: '#444' // Subtle border
+  },
+  
+  // MODAL STYLES
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { backgroundColor: THEME.card, width: '100%', borderRadius: 20, padding: 20, maxHeight: '80%', borderWidth: 1, borderColor: '#333' },
+  modalTitle: { fontSize: 24, fontWeight: 'bold', color: THEME.text, marginBottom: 15, textAlign: 'center' },
+  modalScroll: { marginBottom: 20 },
+  modalText: { color: '#DDD', fontSize: 16, marginBottom: 10, lineHeight: 24 },
+  ruleHeader: { color: THEME.primary, fontSize: 18, fontWeight: 'bold', marginTop: 15, marginBottom: 5 },
+  exampleBox: { backgroundColor: '#111', padding: 10, borderRadius: 10, marginVertical: 10 },
+  exampleText: { color: '#FFF', fontSize: 15, marginBottom: 5 },
+  modalCloseBtn: { backgroundColor: THEME.primary, padding: 15, borderRadius: 15, alignItems: 'center' },
+
   welcomeSection: { marginBottom: 30, alignItems: 'center' },
   welcomeText: { fontSize: 20, color: THEME.textDim },
   usernameHighlight: { color: THEME.text, fontWeight: 'bold' },
