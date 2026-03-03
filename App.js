@@ -3,7 +3,7 @@ import React, { useState, useEffect, useContext, createContext } from 'react';
 import { 
   StyleSheet, Text, View, TextInput, TouchableOpacity, FlatList, 
   Alert, ActivityIndicator, KeyboardAvoidingView, Platform, 
-  StatusBar, Keyboard, ScrollView, Linking 
+  StatusBar, Keyboard, ScrollView, Linking as RNLinking 
 } from 'react-native';
 import { NavigationContainer, useNavigation } from '@react-navigation/native';
 import { createDrawerNavigator, DrawerContentScrollView, DrawerItemList } from '@react-navigation/drawer';
@@ -13,18 +13,39 @@ import ConfettiCannon from 'react-native-confetti-cannon';
 import * as Haptics from 'expo-haptics'; 
 import { Ionicons } from '@expo/vector-icons'; 
 
+// 👇 NEW GOOGLE LOGIN IMPORTS 👇
+import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
+
+// Tells the browser to safely close after we log in
+WebBrowser.maybeCompleteAuthSession();
+
 // --- THEME ---
 const THEME = {
   bg: '#121212', card: '#1E1E1E', text: '#FFFFFF', textDim: '#AAAAAA', 
   primary: '#0A84FF', success: '#30D158', danger: '#FF453A', inputBg: '#2C2C2E',
-  gold: '#FFD700', drawerBg: '#1A1A1A'
+  gold: '#FFD700', drawerBg: '#1A1A1A', google: '#4285F4' // Added Google Blue
 };
 
 const UserContext = createContext();
 
 // 1. CUSTOM DRAWER
 function CustomDrawerContent(props) {
-  const { username } = useContext(UserContext);
+  // 👇 Added setUsername so we can clear the name from the screen
+  const { username, setUsername } = useContext(UserContext); 
+
+  const handleLogOut = async () => {
+    Alert.alert("Log Out", "Are you sure you want to log out?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Log Out", style: "destructive", onPress: async () => {
+          await supabase.auth.signOut(); // Tells Supabase to end the session
+          setUsername(''); // Clears the UI
+          await supabase.auth.signInAnonymously(); // Generates a fresh guest session so the app doesn't crash
+          props.navigation.closeDrawer(); // Closes the side menu
+      }}
+    ]);
+  };
+
   return (
     <View style={{flex: 1, backgroundColor: THEME.drawerBg}}>
       <SafeAreaView edges={['top']} style={{backgroundColor: '#252525'}}>
@@ -41,7 +62,13 @@ function CustomDrawerContent(props) {
       <DrawerContentScrollView {...props} contentContainerStyle={{paddingTop: 0}}>
         <DrawerItemList {...props} />
       </DrawerContentScrollView>
+      
+      {/* 👇 ADDED LOGOUT BUTTON IN FOOTER 👇 */}
       <View style={{padding: 20, borderTopWidth: 1, borderTopColor: '#333'}}>
+        <TouchableOpacity onPress={handleLogOut} style={{flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, marginBottom: 15}}>
+          <Ionicons name="log-out-outline" size={24} color={THEME.danger} />
+          <Text style={{color: THEME.danger, fontSize: 16, fontWeight: 'bold'}}>Log Out</Text>
+        </TouchableOpacity>
         <Text style={{color: '#555', fontSize: 12}}>Version 1.1</Text>
       </View>
     </View>
@@ -66,6 +93,66 @@ function GameScreen() {
   const [nameInput, setNameInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
+  // 👇 NEW GOOGLE LOGIN FUNCTION 👇
+  const handleGoogleLogin = async () => {
+    setIsSaving(true);
+    try {
+      const redirectUrl = Linking.createURL('');
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+          skipBrowserRedirect: true,
+        },
+      });
+
+      if (error) throw error;
+      
+      // Open the secure Google browser window
+      const res = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+      
+      // Catch the boomerang when the window closes
+      if (res.type === 'success' && res.url) {
+        
+        const urlParams = res.url.split('#')[1]; 
+        
+        if (urlParams) {
+           let access_token = null;
+           let refresh_token = null;
+           
+           // Safely extract the tokens from the URL
+           urlParams.split('&').forEach(param => {
+              const splitIndex = param.indexOf('=');
+              if (splitIndex > 0) {
+                const key = param.substring(0, splitIndex);
+                const value = param.substring(splitIndex + 1);
+                if (key === 'access_token') access_token = value;
+                if (key === 'refresh_token') refresh_token = value;
+              }
+           });
+
+           // Hand the keys to Supabase to establish the permanent session
+           if (access_token && refresh_token) {
+              const { error: sessionError } = await supabase.auth.setSession({
+                 access_token,
+                 refresh_token
+              });
+              
+              if (sessionError) throw sessionError;
+           }
+        }
+      }
+    } catch (err) {
+      console.log("Login Error:", err.message);
+      Alert.alert("Login Error", err.message);
+    } finally {
+      setIsSaving(false); 
+    }
+  };
+
+
+
+  // Number Generator (ensures no duplicate digits)
   const generateUniqueNumber = (length) => {
     let digits = [];
     while (digits.length < length) {
@@ -78,7 +165,7 @@ function GameScreen() {
   const startGame = async () => {
     if (!username) {
       if (!nameInput.trim()) {
-        Alert.alert("Name Required", "Please enter your name to start!");
+        Alert.alert("Name Required", "Please enter your name or Sign in with Google to start!");
         return;
       }
       setIsSaving(true);
@@ -93,7 +180,6 @@ function GameScreen() {
     }
 
     const newTarget = generateUniqueNumber(difficulty);
-    console.log("Secret:", newTarget);
     setTargetNumber(newTarget);
     setGuessesCount(0);
     setTimeTaken(0);
@@ -144,7 +230,6 @@ function GameScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* HEADER ROW */}
       <View style={styles.headerRow}>
         <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.headerSideBtn}>
           <Ionicons name="menu" size={32} color={THEME.text} />
@@ -157,7 +242,6 @@ function GameScreen() {
 
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex: 1, paddingHorizontal: 20}}>
         
-        {/* IDLE STATE: FIXED SPACING & ALIGNMENT */}
         {gameState === 'idle' && (
           <View style={styles.centerContent}>
             
@@ -167,13 +251,19 @@ function GameScreen() {
                   Welcome, <Text style={{color: THEME.text, fontWeight: 'bold'}}>{username}</Text>
                 </Text>
               ) : (
-                <TextInput style={[styles.input, {width: '100%', textAlign: 'center'}]} placeholder="Enter your Name" placeholderTextColor="#777" value={nameInput} onChangeText={setNameInput} />
+                <View style={{width: '100%'}}>
+                  <TextInput style={[styles.input, {width: '100%', textAlign: 'center', marginBottom: 10}]} placeholder="Enter your Name" placeholderTextColor="#777" value={nameInput} onChangeText={setNameInput} />
+                  
+                  {/* 👇 NEW GOOGLE BUTTON 👇 */}
+                  <TouchableOpacity style={[styles.startButton, {backgroundColor: THEME.google, paddingVertical: 12}]} onPress={handleGoogleLogin}>
+                    {isSaving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>🌐 Sign in with Google</Text>}
+                  </TouchableOpacity>
+                  <Text style={{color: '#666', textAlign: 'center', marginTop: 5, fontSize: 12}}>Sign in to save your progress permanently</Text>
+                </View>
               )}
             </View>
 
             <Text style={styles.label}>Select Difficulty</Text>
-            
-            {/* DIFFICULTY BUTTONS */}
             <View style={styles.diffRow}>
               {[3, 4, 5].map(num => (
                 <TouchableOpacity key={num} style={[styles.diffButton, difficulty === num && styles.activeDiff]} onPress={() => setDifficulty(num)}>
@@ -347,7 +437,7 @@ function RulesScreen() {
 
 function PrivacyScreen() {
   const navigation = useNavigation();
-  const openLink = () => { Linking.openURL('https://alder-ulna-f96.notion.site/Privacy-Policy-2b738e90ac18808b93a4e98828be9790'); };
+  const openLink = () => { RNLinking.openURL('https://alder-ulna-f96.notion.site/Privacy-Policy-2b738e90ac18808b93a4e98828be9790'); };
   return (
     <SafeAreaView style={styles.screenContainer}>
         <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
@@ -359,20 +449,44 @@ function PrivacyScreen() {
 }
 
 const Drawer = createDrawerNavigator();
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [username, setUsername] = useState('');
+
+  // 👇 UPDATED AUTH LISTENER 👇
   useEffect(() => {
+    // 1. Check initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) fetchProfile(session.user.id);
       else supabase.auth.signInAnonymously();
     });
+
+    // 2. Listen for Google Login success
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      setSession(session);
+      if (session) {
+        // If they logged in with Google, auto-grab their Google Name and save it!
+        if (session.user.app_metadata?.provider === 'google') {
+           const googleName = session.user.user_metadata?.full_name || 'Google Player';
+           // This safely saves their name without throwing a duplicate error
+           await supabase.from('profiles').upsert({ id: session.user.id, username: googleName }, { onConflict: 'id', ignoreDuplicates: true });
+        }
+        fetchProfile(session.user.id);
+      }
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
   }, []);
+
   const fetchProfile = async (userId) => {
     const { data } = await supabase.from('profiles').select('username').eq('id', userId).single();
     if (data) setUsername(data.username);
   };
+
   return (
     <SafeAreaProvider>
       <UserContext.Provider value={{ session, username, setUsername, fetchProfile }}>
@@ -412,24 +526,19 @@ const styles = StyleSheet.create({
     textAlign: 'center' 
   },
   headerSideBtn: { width: 60, height: 40, justifyContent: 'center' },
-  
-  // FIXED 1: Replaced justifyContent: 'center' with 'flex-start' and paddingTop
   centerContent: {
     flex: 1,
-    alignItems: 'center', // Centers children horizontally
-    justifyContent: 'flex-start', // Starts from top
-    paddingTop: 60, // Specific distance from header
+    alignItems: 'center', 
+    justifyContent: 'flex-start', 
+    paddingTop: 60, 
     width: '100%'
   },
-  
-  // FIXED 2: Added justifyContent: 'center' to diffRow
   diffRow: { 
     flexDirection: 'row', 
     gap: 20, 
     marginBottom: 30,
-    justifyContent: 'center' // Fixes Left Alignment
+    justifyContent: 'center' 
   },
-
   title: { fontSize: 28, fontWeight: 'bold', color: THEME.text, marginBottom: 20 },
   backLink: { marginBottom: 20 },
   linkText: { color: THEME.primary, fontSize: 16 },
