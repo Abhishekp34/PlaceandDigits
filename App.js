@@ -1,11 +1,11 @@
 import 'react-native-gesture-handler';
-import React, { useState, useEffect, useContext, createContext } from 'react';
+import React, { useState, useEffect, useContext, createContext, useCallback } from 'react';
 import { 
   StyleSheet, Text, View, TextInput, TouchableOpacity, FlatList, 
   Alert, ActivityIndicator, KeyboardAvoidingView, Platform, 
   StatusBar, Keyboard, ScrollView, Linking as RNLinking 
 } from 'react-native';
-import { NavigationContainer, useNavigation } from '@react-navigation/native';
+import { NavigationContainer, useNavigation, useFocusEffect } from '@react-navigation/native';
 import { createDrawerNavigator, DrawerContentScrollView, DrawerItemList } from '@react-navigation/drawer';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context'; 
 import { supabase } from './supabase'; 
@@ -55,7 +55,6 @@ function CustomDrawerContent(props) {
           </View>
           <View>
              <Text style={{color: '#FFF', fontSize: 16, fontWeight: 'bold'}}>{username || 'Guest'}</Text>
-             <Text style={{color: THEME.textDim, fontSize: 12}}>Player</Text>
           </View>
         </View>
       </SafeAreaView>
@@ -331,29 +330,86 @@ function GameScreen() {
 // 3. PROFILE, 4. LEADERBOARD, 5. HISTORY, 6. RULES, 7. PRIVACY
 function ProfileScreen() {
   const { session, username, setUsername } = useContext(UserContext);
-  const [inputText, setInputText] = useState(username);
+  const [inputText, setInputText] = useState(username || '');
   const [loading, setLoading] = useState(false);
+  const [isEditing, setIsEditing] = useState(false); // 👈 NEW: Tracks if we are in Edit Mode
   const navigation = useNavigation();
+
+  // 👈 NEW: Ensures the text box always matches your real username when you open the screen
+  useEffect(() => {
+    setInputText(username || '');
+  }, [username]);
+
   const handleSave = async () => {
     if (!session || !inputText.trim()) return;
+    
+    // If they clicked save without changing anything, just close edit mode
+    if (inputText.trim() === username) {
+        setIsEditing(false);
+        return;
+    }
+
     setLoading(true);
-    const { error } = await supabase.from('profiles').upsert({ id: session.user.id, username: inputText });
+    const { error } = await supabase.from('profiles').upsert({ id: session.user.id, username: inputText.trim() });
     setLoading(false);
+    
     if (error) {
-       if (error.code === '23505') Alert.alert("Taken", "Username already exists.");
-       else Alert.alert("Error", error.message);
+       if (error.code === '23505') {
+           Alert.alert("Taken", "Username already exists. Try another!");
+       } else {
+           Alert.alert("Error", error.message);
+       }
     } else {
-       setUsername(inputText);
-       Alert.alert("Success", "Username updated!", [{ text: "OK", onPress: () => navigation.navigate("Home") }]);
+       setUsername(inputText.trim());
+       setIsEditing(false); // 👈 Close edit mode on success!
+       Alert.alert("Success", "Username updated!");
     }
   };
+
+  const handleCancel = () => {
+      setInputText(username || ''); // Revert the text box back to the original name
+      setIsEditing(false); // Close edit mode
+  };
+
   return (
     <SafeAreaView style={styles.screenContainer}>
-       <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
-       <Text style={styles.title}>Edit Profile</Text>
-       <Text style={styles.label}>Choose a Display Name</Text>
-       <TextInput style={[styles.input, {width: '100%', marginBottom: 20}]} value={inputText} onChangeText={setInputText} placeholder="e.g. LogicMaster" placeholderTextColor="#666" />
-       <TouchableOpacity style={styles.startButton} onPress={handleSave}>{loading ? <ActivityIndicator color="#FFF"/> : <Text style={styles.btnText}>Save Profile</Text>}</TouchableOpacity>
+       <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.backLink}>
+           <Text style={styles.linkText}>☰ Menu</Text>
+       </TouchableOpacity>
+       <Text style={styles.title}>Profile</Text>
+       
+       <Text style={styles.label}>Username</Text>
+       
+       {isEditing ? (
+           // ✏️ EDITING MODE: Shows the text input and Save/Cancel buttons
+           <View style={{width: '100%'}}>
+               <TextInput 
+                   style={[styles.input, {width: '100%', marginBottom: 15}]} 
+                   value={inputText} 
+                   onChangeText={setInputText} 
+                   placeholder="Choose a unique username" 
+                   placeholderTextColor="#666" 
+                   autoFocus 
+               />
+               <TouchableOpacity style={styles.startButton} onPress={handleSave}>
+                   {loading ? <ActivityIndicator color="#FFF"/> : <Text style={styles.btnText}>Save Profile</Text>}
+               </TouchableOpacity>
+               
+               <TouchableOpacity style={[styles.startButton, {backgroundColor: '#444', marginTop: -5}]} onPress={handleCancel}>
+                   <Text style={styles.btnText}>Cancel</Text>
+               </TouchableOpacity>
+           </View>
+       ) : (
+           // 👁️ VIEWING MODE: Shows the static name and the Edit button
+           <View style={{width: '100%', alignItems: 'flex-start'}}>
+               <Text style={{fontSize: 24, color: THEME.text, fontWeight: 'bold', marginBottom: 20}}>
+                   {username || 'Guest'}
+               </Text>
+               <TouchableOpacity style={[styles.startButton, {backgroundColor: THEME.primary}]} onPress={() => setIsEditing(true)}>
+                   <Text style={styles.btnText}>✏️ Edit Username</Text>
+               </TouchableOpacity>
+           </View>
+       )}
     </SafeAreaView>
   );
 }
@@ -361,23 +417,42 @@ function ProfileScreen() {
 function LeaderboardScreen() {
   const navigation = useNavigation();
   const [leaders, setLeaders] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // Changed to true so it spins on first load
   const [difficulty, setDifficulty] = useState(4);
   const [sortBy, setSortBy] = useState('time'); 
-  useEffect(() => { fetchLeaders(); }, [difficulty, sortBy]);
+
+  // 👇 NEW: Fetches fresh data when you open the screen OR change a filter
+  useFocusEffect(
+    useCallback(() => {
+      fetchLeaders();
+    }, [difficulty, sortBy])
+  );
+
   const fetchLeaders = async () => {
     setLoading(true);
-    let query = supabase.from('leaderboards').select(`difficulty, time_seconds, guesses_count, profiles!user_id (username)`).eq('difficulty', difficulty);
-    if (sortBy === 'time') query = query.order('time_seconds', { ascending: true });
-    else query = query.order('guesses_count', { ascending: true });
+    let query = supabase
+      .from('leaderboards')
+      .select(`difficulty, time_seconds, guesses_count, profiles!user_id (username)`)
+      .eq('difficulty', difficulty);
+      
+    if (sortBy === 'time') {
+        query = query.order('time_seconds', { ascending: true });
+    } else {
+        query = query.order('guesses_count', { ascending: true });
+    }
+    
     const { data } = await query.limit(20);
     if(data) setLeaders(data);
     setLoading(false);
   };
+
   return (
     <SafeAreaView style={styles.screenContainer}>
-       <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
+       <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.backLink}>
+           <Text style={styles.linkText}>☰ Menu</Text>
+       </TouchableOpacity>
        <Text style={styles.title}>Global Top 20</Text>
+       
        <View style={styles.diffRow}>
           {[3, 4, 5].map(num => (
             <TouchableOpacity key={num} style={[styles.diffButton, difficulty === num && styles.activeDiff]} onPress={() => setDifficulty(num)}>
@@ -385,11 +460,34 @@ function LeaderboardScreen() {
             </TouchableOpacity>
           ))}
        </View>
+       
        <View style={styles.tabRow}>
-         <TouchableOpacity style={[styles.tab, sortBy === 'time' && styles.activeTab]} onPress={() => setSortBy('time')}><Text style={styles.tabText}>Fastest Time ⚡️</Text></TouchableOpacity>
-         <TouchableOpacity style={[styles.tab, sortBy === 'guesses' && styles.activeTab]} onPress={() => setSortBy('guesses')}><Text style={styles.tabText}>Fewest Tries 🎯</Text></TouchableOpacity>
+         <TouchableOpacity style={[styles.tab, sortBy === 'time' && styles.activeTab]} onPress={() => setSortBy('time')}>
+            <Text style={styles.tabText}>Fastest Time ⚡️</Text>
+         </TouchableOpacity>
+         <TouchableOpacity style={[styles.tab, sortBy === 'guesses' && styles.activeTab]} onPress={() => setSortBy('guesses')}>
+            <Text style={styles.tabText}>Fewest Tries 🎯</Text>
+         </TouchableOpacity>
        </View>
-       {loading ? <ActivityIndicator color={THEME.primary} /> : <FlatList data={leaders} keyExtractor={(item, i) => i.toString()} renderItem={({ item, index }) => (<View style={styles.scoreRow}><Text style={styles.rank}>#{index + 1}</Text><Text style={styles.name}>{item.profiles ? item.profiles.username : 'Anon'}</Text><Text style={styles.scoreVal}>{sortBy === 'time' ? `${item.time_seconds}s` : `${item.guesses_count} tries`}</Text></View>)} />}
+       
+       {loading ? (
+           <ActivityIndicator color={THEME.primary} size="large" style={{marginTop: 50}} /> 
+       ) : (
+           <FlatList 
+              data={leaders} 
+              keyExtractor={(item, i) => i.toString()} 
+              renderItem={({ item, index }) => (
+                 <View style={styles.scoreRow}>
+                    <Text style={styles.rank}>#{index + 1}</Text>
+                    <Text style={styles.name}>{item.profiles ? item.profiles.username : 'Anon'}</Text>
+                    <Text style={styles.scoreVal}>
+                       {sortBy === 'time' ? `${item.time_seconds}s` : `${item.guesses_count} tries`}
+                    </Text>
+                 </View>
+              )} 
+              ListEmptyComponent={<Text style={{color:'#666', textAlign:'center', marginTop:20}}>No scores yet. Be the first!</Text>}
+           />
+       )}
     </SafeAreaView>
   );
 }
@@ -399,17 +497,73 @@ function HistoryScreen() {
   const navigation = useNavigation();
   const [history, setMyHistory] = useState([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { if(session) fetchMyHistory(); }, [session]);
+
+  // Fetches data every time you look at the screen!
+  useFocusEffect(
+    useCallback(() => {
+      if (session) fetchMyHistory();
+    }, [session])
+  );
+
   const fetchMyHistory = async () => {
-    const { data } = await supabase.from('leaderboards').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(50);
+    setLoading(true); 
+    const { data } = await supabase
+      .from('leaderboards')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('created_at', { ascending: false })
+      .limit(50);
+      
     if (data) setMyHistory(data);
     setLoading(false);
   };
+
   return (
     <SafeAreaView style={styles.screenContainer}>
-       <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
+       <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.backLink}>
+           <Text style={styles.linkText}>☰ Menu</Text>
+       </TouchableOpacity>
        <Text style={styles.title}>My Game History</Text>
-       {loading ? <ActivityIndicator /> : <FlatList data={history} keyExtractor={item => item.id.toString()} renderItem={({item}) => (<View style={styles.historyCard}><View style={styles.historyBadge}><Text style={styles.historyBadgeText}>{item.difficulty}</Text></View><Text style={styles.historyCardText}>⏳ {item.time_seconds}s</Text><Text style={styles.historyCardText}>#️⃣ {item.guesses_count}</Text></View>)} ListEmptyComponent={<Text style={{color:'#666', textAlign:'center', marginTop:20}}>No games played yet.</Text>} />}
+       
+       {/* 👇 NEW: The Column Headers 👇 */}
+       {!loading && history.length > 0 && (
+         <View style={styles.historyHeaderRow}>
+            <Text style={[styles.historyHeaderText, {width: 30}]}>#</Text>
+            <Text style={[styles.historyHeaderText, {flex: 1, textAlign: 'center'}]}>Difficulty</Text>
+            <Text style={[styles.historyHeaderText, {flex: 1, textAlign: 'center'}]}>Seconds</Text>
+            <Text style={[styles.historyHeaderText, {flex: 1, textAlign: 'center'}]}>Tries</Text>
+         </View>
+       )}
+
+       {loading ? (
+           <ActivityIndicator color={THEME.primary} size="large" style={{marginTop: 50}} /> 
+       ) : (
+           <FlatList 
+              data={history} 
+              keyExtractor={item => item.id.toString()} 
+              // 👇 NEW: We added 'index' here to grab the row number!
+              renderItem={({item, index}) => (
+                <View style={styles.historyCardGrid}>
+                   {/* Column 1: Index Number */}
+                   <Text style={styles.historyIndex}>{index + 1}</Text>
+                   
+                   {/* Column 2: Game Mode */}
+                   <View style={{flex: 1, alignItems: 'center'}}>
+                      <View style={styles.historyBadge}>
+                         <Text style={styles.historyBadgeText}>{item.difficulty}</Text>
+                      </View>
+                   </View>
+                   
+                   {/* Column 3: Time */}
+                   <Text style={[styles.historyCardText, {flex: 1, textAlign: 'center'}]}>⏳ {item.time_seconds}s</Text>
+                   
+                   {/* Column 4: Tries */}
+                   <Text style={[styles.historyCardText, {flex: 1, textAlign: 'center'}]}>#️⃣ {item.guesses_count}</Text>
+                </View>
+              )} 
+              ListEmptyComponent={<Text style={{color:'#666', textAlign:'center', marginTop:20}}>No games played yet.</Text>} 
+           />
+       )}
     </SafeAreaView>
   );
 }
@@ -587,4 +741,34 @@ const styles = StyleSheet.create({
   ruleHeader: { color: THEME.primary, fontSize: 18, fontWeight: 'bold', marginTop: 15, marginBottom: 5 },
   exampleBox: { backgroundColor: '#111', padding: 10, borderRadius: 10, marginVertical: 10 },
   exampleText: { color: '#FFF', fontSize: 15, marginBottom: 5 },
+  historyHeaderRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 15,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+    marginBottom: 10,
+  },
+  historyHeaderText: {
+    color: '#888',
+    fontSize: 12,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  historyCardGrid: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: THEME.card,
+    paddingVertical: 15,
+    paddingHorizontal: 15,
+    borderRadius: 12,
+    marginBottom: 10,
+  },
+  historyIndex: {
+    color: '#666',
+    fontWeight: 'bold',
+    fontSize: 16,
+    width: 30,
+  },
 });
