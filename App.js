@@ -7,41 +7,156 @@ import {
 } from 'react-native';
 import { NavigationContainer, useNavigation, useFocusEffect } from '@react-navigation/native';
 import { createDrawerNavigator, DrawerContentScrollView, DrawerItemList } from '@react-navigation/drawer';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context'; 
 import { supabase } from './supabase'; 
 import ConfettiCannon from 'react-native-confetti-cannon'; 
 import * as Haptics from 'expo-haptics'; 
 import { Ionicons } from '@expo/vector-icons'; 
 
-// 👇 NEW GOOGLE LOGIN IMPORTS 👇
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 
-// Tells the browser to safely close after we log in
 WebBrowser.maybeCompleteAuthSession();
 
-// --- THEME ---
 const THEME = {
   bg: '#121212', card: '#1E1E1E', text: '#FFFFFF', textDim: '#AAAAAA', 
   primary: '#0A84FF', success: '#30D158', danger: '#FF453A', inputBg: '#2C2C2E',
-  gold: '#FFD700', drawerBg: '#1A1A1A', google: '#4285F4' // Added Google Blue
+  gold: '#FFD700', drawerBg: '#1A1A1A', google: '#4285F4' 
 };
 
 const UserContext = createContext();
+const Stack = createNativeStackNavigator();
+const Drawer = createDrawerNavigator();
 
-// 1. CUSTOM DRAWER
+// ==========================================
+// 1. GATEWAY: WELCOME SCREEN (UPDATED)
+// ==========================================
+function WelcomeScreen() {
+  const { session, setUsername } = useContext(UserContext);
+  const [nameInput, setNameInput] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Helper function to check if username is unique
+  const checkIsNameTaken = async (name) => {
+    const { data } = await supabase.from('profiles').select('username').eq('username', name).single();
+    return !!data;
+  };
+
+  const handleGuestPlay = async () => {
+    if (!nameInput.trim()) return Alert.alert("Required", "Please choose a unique username!");
+    if (!session) return Alert.alert("Wait", "Initializing connection...");
+
+    setIsSaving(true);
+    const isTaken = await checkIsNameTaken(nameInput.trim());
+    
+    if (isTaken) {
+      setIsSaving(false);
+      return Alert.alert("Taken", "That username is already in use. Try another!");
+    }
+
+    const { error } = await supabase.from('profiles').upsert({ id: session.user.id, username: nameInput.trim() });
+    if (error) Alert.alert("Error", error.message);
+    else setUsername(nameInput.trim()); 
+    
+    setIsSaving(false);
+  };
+
+  const handleGoogleLogin = async () => {
+    if (!nameInput.trim()) return Alert.alert("Required", "Please choose a unique username first!");
+    
+    setIsSaving(true);
+    const isTaken = await checkIsNameTaken(nameInput.trim());
+    
+    if (isTaken) {
+      setIsSaving(false);
+      return Alert.alert("Taken", "That username is already in use. Try another!");
+    }
+
+    try {
+      const redirectUrl = Linking.createURL('');
+      const { data, error } = await supabase.auth.signInWithOAuth({ 
+        provider: 'google', 
+        options: { redirectTo: redirectUrl, skipBrowserRedirect: true } 
+      });
+      if (error) throw error;
+      
+      const res = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+      
+      if (res.type === 'success' && res.url) {
+        const urlParams = res.url.split('#')[1]; 
+        if (urlParams) {
+           let access_token = null, refresh_token = null;
+           urlParams.split('&').forEach(param => {
+              const splitIndex = param.indexOf('=');
+              if (splitIndex > 0) {
+                const key = param.substring(0, splitIndex);
+                const value = param.substring(splitIndex + 1);
+                if (key === 'access_token') access_token = value;
+                if (key === 'refresh_token') refresh_token = value;
+              }
+           });
+
+           if (access_token && refresh_token) {
+              const { data: sessionData, error: sessionError } = await supabase.auth.setSession({ access_token, refresh_token });
+              if (sessionError) throw sessionError;
+              
+              await supabase.from('profiles').upsert({ id: sessionData.session.user.id, username: nameInput.trim() });
+              setUsername(nameInput.trim()); 
+           }
+        }
+      }
+    } catch (err) {
+      Alert.alert("Login Error", err.message);
+    } finally {
+      setIsSaving(false); 
+    }
+  };
+
+  return (
+    // 👇 FIXED: Added screenContainer for the dark background, and centered vertically
+    <SafeAreaView style={[styles.screenContainer, { justifyContent: 'center' }]}>
+      <View style={{ width: '100%', alignItems: 'center', paddingBottom: 50 }}>
+        <Text style={[styles.headerTitle, { fontSize: 40, marginBottom: 10 }]}>PlaceNDigits</Text>
+        <Text style={{ color: THEME.textDim, marginBottom: 40, fontSize: 16 }}>Pick a unique identity to start playing.</Text>
+
+        <View style={{ width: '100%', marginBottom: 30 }}>
+          {/* 👇 FIXED: Removed the external label, updated the placeholder text */}
+          <TextInput 
+            style={[styles.input, { width: '100%', marginBottom: 20, textAlign: 'center', fontSize: 20 }]} 
+            placeholder="Choose a username" 
+            placeholderTextColor="#777" 
+            value={nameInput} 
+            onChangeText={setNameInput} 
+          />
+
+          <TouchableOpacity style={[styles.startButton, { backgroundColor: THEME.google, marginBottom: 15 }]} onPress={handleGoogleLogin}>
+            {isSaving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>🌐 Sign in with Google</Text>}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.helpButtonLarge, { backgroundColor: THEME.card }]} onPress={handleGuestPlay}>
+            {isSaving ? <ActivityIndicator color="#FFF" /> : <Text style={[styles.btnText, { color: THEME.textDim }]}>Play as Guest</Text>}
+          </TouchableOpacity>
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+// ==========================================
+// 2. CUSTOM DRAWER CONTENT
+// ==========================================
 function CustomDrawerContent(props) {
-  // 👇 Added setUsername so we can clear the name from the screen
   const { username, setUsername } = useContext(UserContext); 
 
   const handleLogOut = async () => {
     Alert.alert("Log Out", "Are you sure you want to log out?", [
       { text: "Cancel", style: "cancel" },
       { text: "Log Out", style: "destructive", onPress: async () => {
-          await supabase.auth.signOut(); // Tells Supabase to end the session
-          setUsername(''); // Clears the UI
-          await supabase.auth.signInAnonymously(); // Generates a fresh guest session so the app doesn't crash
-          props.navigation.closeDrawer(); // Closes the side menu
+          await supabase.auth.signOut(); 
+          setUsername(''); 
+          await supabase.auth.signInAnonymously(); 
+          props.navigation.closeDrawer(); 
       }}
     ]);
   };
@@ -62,21 +177,22 @@ function CustomDrawerContent(props) {
         <DrawerItemList {...props} />
       </DrawerContentScrollView>
       
-      {/* 👇 ADDED LOGOUT BUTTON IN FOOTER 👇 */}
       <View style={{padding: 20, borderTopWidth: 1, borderTopColor: '#333'}}>
         <TouchableOpacity onPress={handleLogOut} style={{flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, marginBottom: 15}}>
           <Ionicons name="log-out-outline" size={24} color={THEME.danger} />
           <Text style={{color: THEME.danger, fontSize: 16, fontWeight: 'bold'}}>Log Out</Text>
         </TouchableOpacity>
-        <Text style={{color: '#555', fontSize: 12}}>Version 1.1</Text>
+        <Text style={{color: '#555', fontSize: 12}}>Version 1.2</Text>
       </View>
     </View>
   );
 }
 
-// 2. GAME SCREEN
+// ==========================================
+// 3. MAIN GAME SCREEN (CLEANED UP)
+// ==========================================
 function GameScreen() {
-  const { session, username, setUsername } = useContext(UserContext);
+  const { session, username } = useContext(UserContext);
   const navigation = useNavigation();
   
   const [difficulty, setDifficulty] = useState(4);
@@ -89,69 +205,7 @@ function GameScreen() {
   const [history, setHistory] = useState([]); 
   const [isGameWon, setIsGameWon] = useState(false);
   const [gameState, setGameState] = useState('idle'); 
-  const [nameInput, setNameInput] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
 
-  // 👇 NEW GOOGLE LOGIN FUNCTION 👇
-  const handleGoogleLogin = async () => {
-    setIsSaving(true);
-    try {
-      const redirectUrl = Linking.createURL('');
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: redirectUrl,
-          skipBrowserRedirect: true,
-        },
-      });
-
-      if (error) throw error;
-      
-      // Open the secure Google browser window
-      const res = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
-      
-      // Catch the boomerang when the window closes
-      if (res.type === 'success' && res.url) {
-        
-        const urlParams = res.url.split('#')[1]; 
-        
-        if (urlParams) {
-           let access_token = null;
-           let refresh_token = null;
-           
-           // Safely extract the tokens from the URL
-           urlParams.split('&').forEach(param => {
-              const splitIndex = param.indexOf('=');
-              if (splitIndex > 0) {
-                const key = param.substring(0, splitIndex);
-                const value = param.substring(splitIndex + 1);
-                if (key === 'access_token') access_token = value;
-                if (key === 'refresh_token') refresh_token = value;
-              }
-           });
-
-           // Hand the keys to Supabase to establish the permanent session
-           if (access_token && refresh_token) {
-              const { error: sessionError } = await supabase.auth.setSession({
-                 access_token,
-                 refresh_token
-              });
-              
-              if (sessionError) throw sessionError;
-           }
-        }
-      }
-    } catch (err) {
-      console.log("Login Error:", err.message);
-      Alert.alert("Login Error", err.message);
-    } finally {
-      setIsSaving(false); 
-    }
-  };
-
-
-
-  // Number Generator (ensures no duplicate digits)
   const generateUniqueNumber = (length) => {
     let digits = [];
     while (digits.length < length) {
@@ -162,22 +216,6 @@ function GameScreen() {
   };
 
   const startGame = async () => {
-    if (!username) {
-      if (!nameInput.trim()) {
-        Alert.alert("Name Required", "Please enter your name or Sign in with Google to start!");
-        return;
-      }
-      setIsSaving(true);
-      const { error } = await supabase.from('profiles').upsert({ id: session?.user?.id, username: nameInput });
-      setIsSaving(false);
-      if (error) {
-        if (error.code === '23505') Alert.alert("Taken", "That name is already taken. Try another.");
-        else Alert.alert("Error", "Could not save name. Check internet.");
-        return; 
-      }
-      setUsername(nameInput);
-    }
-
     const newTarget = generateUniqueNumber(difficulty);
     setTargetNumber(newTarget);
     setGuessesCount(0);
@@ -243,23 +281,10 @@ function GameScreen() {
         
         {gameState === 'idle' && (
           <View style={styles.centerContent}>
-            
             <View style={{marginBottom: 30, width: '100%', alignItems: 'center'}}>
-              {username ? (
                 <Text style={{fontSize: 20, color: THEME.textDim}}>
                   Welcome, <Text style={{color: THEME.text, fontWeight: 'bold'}}>{username}</Text>
                 </Text>
-              ) : (
-                <View style={{width: '100%'}}>
-                  <TextInput style={[styles.input, {width: '100%', textAlign: 'center', marginBottom: 10}]} placeholder="Enter your Name" placeholderTextColor="#777" value={nameInput} onChangeText={setNameInput} />
-                  
-                  {/* 👇 NEW GOOGLE BUTTON 👇 */}
-                  <TouchableOpacity style={[styles.startButton, {backgroundColor: THEME.google, paddingVertical: 12}]} onPress={handleGoogleLogin}>
-                    {isSaving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>🌐 Sign in with Google</Text>}
-                  </TouchableOpacity>
-                  <Text style={{color: '#666', textAlign: 'center', marginTop: 5, fontSize: 12}}>Sign in to save your progress permanently</Text>
-                </View>
-              )}
             </View>
 
             <Text style={styles.label}>Select Difficulty</Text>
@@ -272,7 +297,7 @@ function GameScreen() {
             </View>
             
             <TouchableOpacity style={styles.startButton} onPress={startGame}>
-              {isSaving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>Start Game</Text>}
+              <Text style={styles.btnText}>Start Game</Text>
             </TouchableOpacity>
             
             <TouchableOpacity style={styles.helpButtonLarge} onPress={() => navigation.navigate('How to Play')}>
@@ -281,7 +306,6 @@ function GameScreen() {
           </View>
         )}
 
-        {/* PLAYING STATE */}
         {gameState === 'playing' && (
           <View style={{flex: 1, alignItems: 'center', paddingTop: 20}}>
              <View style={styles.statsRow}>
@@ -305,7 +329,6 @@ function GameScreen() {
           </View>
         )}
 
-        {/* WON STATE */}
         {gameState === 'won' && (
            <View style={{alignItems: 'center', marginTop: 40}}>
               <Text style={styles.celebrationText}>HOORAY!</Text>
@@ -327,48 +350,81 @@ function GameScreen() {
   );
 }
 
-// 3. PROFILE, 4. LEADERBOARD, 5. HISTORY, 6. RULES, 7. PRIVACY
+// ==========================================
+// 4. OTHER SCREENS (Profile, Leaderboard, etc)
+// ==========================================
 function ProfileScreen() {
   const { session, username, setUsername } = useContext(UserContext);
   const [inputText, setInputText] = useState(username || '');
   const [loading, setLoading] = useState(false);
-  const [isEditing, setIsEditing] = useState(false); // 👈 NEW: Tracks if we are in Edit Mode
+  const [isEditing, setIsEditing] = useState(false); 
   const navigation = useNavigation();
 
-  // 👈 NEW: Ensures the text box always matches your real username when you open the screen
-  useEffect(() => {
-    setInputText(username || '');
-  }, [username]);
+  // Checks if the user is a Guest by looking at their login provider
+  const isGuest = session?.user?.app_metadata?.provider !== 'google';
+
+  useEffect(() => { setInputText(username || ''); }, [username]);
 
   const handleSave = async () => {
     if (!session || !inputText.trim()) return;
-    
-    // If they clicked save without changing anything, just close edit mode
-    if (inputText.trim() === username) {
-        setIsEditing(false);
-        return;
-    }
+    if (inputText.trim() === username) return setIsEditing(false);
 
     setLoading(true);
     const { error } = await supabase.from('profiles').upsert({ id: session.user.id, username: inputText.trim() });
     setLoading(false);
     
     if (error) {
-       if (error.code === '23505') {
-           Alert.alert("Taken", "Username already exists. Try another!");
-       } else {
-           Alert.alert("Error", error.message);
-       }
+       if (error.code === '23505') Alert.alert("Taken", "Username already exists. Try another!");
+       else Alert.alert("Error", error.message);
     } else {
        setUsername(inputText.trim());
-       setIsEditing(false); // 👈 Close edit mode on success!
+       setIsEditing(false); 
        Alert.alert("Success", "Username updated!");
     }
   };
 
-  const handleCancel = () => {
-      setInputText(username || ''); // Revert the text box back to the original name
-      setIsEditing(false); // Close edit mode
+  // 👇 NEW: Allows a guest to link their Google Account from the profile screen!
+  const handleLinkGoogle = async () => {
+    setLoading(true);
+    try {
+      const redirectUrl = Linking.createURL('');
+      const { data, error } = await supabase.auth.signInWithOAuth({ 
+        provider: 'google', 
+        options: { redirectTo: redirectUrl, skipBrowserRedirect: true } 
+      });
+      if (error) throw error;
+      
+      const res = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+      
+      if (res.type === 'success' && res.url) {
+        const urlParams = res.url.split('#')[1]; 
+        if (urlParams) {
+           let access_token = null, refresh_token = null;
+           urlParams.split('&').forEach(param => {
+              const splitIndex = param.indexOf('=');
+              if (splitIndex > 0) {
+                const key = param.substring(0, splitIndex);
+                const value = param.substring(splitIndex + 1);
+                if (key === 'access_token') access_token = value;
+                if (key === 'refresh_token') refresh_token = value;
+              }
+           });
+
+           if (access_token && refresh_token) {
+              const { data: sessionData, error: sessionError } = await supabase.auth.setSession({ access_token, refresh_token });
+              if (sessionError) throw sessionError;
+              
+              // Ensure their unique username is preserved
+              await supabase.from('profiles').upsert({ id: sessionData.session.user.id, username });
+              Alert.alert("Success!", "Your Google account has been permanently linked.");
+           }
+        }
+      }
+    } catch (err) {
+      Alert.alert("Link Error", err.message);
+    } finally {
+      setLoading(false); 
+    }
   };
 
   return (
@@ -381,33 +437,28 @@ function ProfileScreen() {
        <Text style={styles.label}>Username</Text>
        
        {isEditing ? (
-           // ✏️ EDITING MODE: Shows the text input and Save/Cancel buttons
            <View style={{width: '100%'}}>
-               <TextInput 
-                   style={[styles.input, {width: '100%', marginBottom: 15}]} 
-                   value={inputText} 
-                   onChangeText={setInputText} 
-                   placeholder="Choose a unique username" 
-                   placeholderTextColor="#666" 
-                   autoFocus 
-               />
+               <TextInput style={[styles.input, {width: '100%', marginBottom: 15}]} value={inputText} onChangeText={setInputText} placeholder="Choose a unique username" placeholderTextColor="#666" autoFocus />
                <TouchableOpacity style={styles.startButton} onPress={handleSave}>
                    {loading ? <ActivityIndicator color="#FFF"/> : <Text style={styles.btnText}>Save Profile</Text>}
                </TouchableOpacity>
-               
-               <TouchableOpacity style={[styles.startButton, {backgroundColor: '#444', marginTop: -5}]} onPress={handleCancel}>
+               <TouchableOpacity style={[styles.startButton, {backgroundColor: '#444', marginTop: -5}]} onPress={() => {setInputText(username || ''); setIsEditing(false);}}>
                    <Text style={styles.btnText}>Cancel</Text>
                </TouchableOpacity>
            </View>
        ) : (
-           // 👁️ VIEWING MODE: Shows the static name and the Edit button
            <View style={{width: '100%', alignItems: 'flex-start'}}>
-               <Text style={{fontSize: 24, color: THEME.text, fontWeight: 'bold', marginBottom: 20}}>
-                   {username || 'Guest'}
-               </Text>
+               <Text style={{fontSize: 24, color: THEME.text, fontWeight: 'bold', marginBottom: 20}}>{username || 'Guest'}</Text>
                <TouchableOpacity style={[styles.startButton, {backgroundColor: THEME.primary}]} onPress={() => setIsEditing(true)}>
                    <Text style={styles.btnText}>✏️ Edit Username</Text>
                </TouchableOpacity>
+
+               {/* 👇 If they are a guest, show the Link Google button! 👇 */}
+               {isGuest && (
+                 <TouchableOpacity style={[styles.startButton, {backgroundColor: THEME.google, marginTop: 20}]} onPress={handleLinkGoogle}>
+                     {loading ? <ActivityIndicator color="#FFF"/> : <Text style={styles.btnText}>🌐 Link Google Account</Text>}
+                 </TouchableOpacity>
+               )}
            </View>
        )}
     </SafeAreaView>
@@ -417,29 +468,17 @@ function ProfileScreen() {
 function LeaderboardScreen() {
   const navigation = useNavigation();
   const [leaders, setLeaders] = useState([]);
-  const [loading, setLoading] = useState(true); // Changed to true so it spins on first load
+  const [loading, setLoading] = useState(true); 
   const [difficulty, setDifficulty] = useState(4);
   const [sortBy, setSortBy] = useState('time'); 
 
-  // 👇 NEW: Fetches fresh data when you open the screen OR change a filter
-  useFocusEffect(
-    useCallback(() => {
-      fetchLeaders();
-    }, [difficulty, sortBy])
-  );
+  useFocusEffect(useCallback(() => { fetchLeaders(); }, [difficulty, sortBy]));
 
   const fetchLeaders = async () => {
     setLoading(true);
-    let query = supabase
-      .from('leaderboards')
-      .select(`difficulty, time_seconds, guesses_count, profiles!user_id (username)`)
-      .eq('difficulty', difficulty);
-      
-    if (sortBy === 'time') {
-        query = query.order('time_seconds', { ascending: true });
-    } else {
-        query = query.order('guesses_count', { ascending: true });
-    }
+    let query = supabase.from('leaderboards').select(`difficulty, time_seconds, guesses_count, profiles!user_id (username)`).eq('difficulty', difficulty);
+    if (sortBy === 'time') query = query.order('time_seconds', { ascending: true });
+    else query = query.order('guesses_count', { ascending: true });
     
     const { data } = await query.limit(20);
     if(data) setLeaders(data);
@@ -448,45 +487,25 @@ function LeaderboardScreen() {
 
   return (
     <SafeAreaView style={styles.screenContainer}>
-       <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.backLink}>
-           <Text style={styles.linkText}>☰ Menu</Text>
-       </TouchableOpacity>
+       <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
        <Text style={styles.title}>Global Top 20</Text>
-       
        <View style={styles.diffRow}>
           {[3, 4, 5].map(num => (
-            <TouchableOpacity key={num} style={[styles.diffButton, difficulty === num && styles.activeDiff]} onPress={() => setDifficulty(num)}>
-              <Text style={[styles.diffText, difficulty === num && styles.activeText]}>{num}</Text>
-            </TouchableOpacity>
+            <TouchableOpacity key={num} style={[styles.diffButton, difficulty === num && styles.activeDiff]} onPress={() => setDifficulty(num)}><Text style={[styles.diffText, difficulty === num && styles.activeText]}>{num}</Text></TouchableOpacity>
           ))}
        </View>
-       
        <View style={styles.tabRow}>
-         <TouchableOpacity style={[styles.tab, sortBy === 'time' && styles.activeTab]} onPress={() => setSortBy('time')}>
-            <Text style={styles.tabText}>Fastest Time ⚡️</Text>
-         </TouchableOpacity>
-         <TouchableOpacity style={[styles.tab, sortBy === 'guesses' && styles.activeTab]} onPress={() => setSortBy('guesses')}>
-            <Text style={styles.tabText}>Fewest Tries 🎯</Text>
-         </TouchableOpacity>
+         <TouchableOpacity style={[styles.tab, sortBy === 'time' && styles.activeTab]} onPress={() => setSortBy('time')}><Text style={styles.tabText}>Fastest Time ⚡️</Text></TouchableOpacity>
+         <TouchableOpacity style={[styles.tab, sortBy === 'guesses' && styles.activeTab]} onPress={() => setSortBy('guesses')}><Text style={styles.tabText}>Fewest Tries 🎯</Text></TouchableOpacity>
        </View>
-       
-       {loading ? (
-           <ActivityIndicator color={THEME.primary} size="large" style={{marginTop: 50}} /> 
-       ) : (
-           <FlatList 
-              data={leaders} 
-              keyExtractor={(item, i) => i.toString()} 
-              renderItem={({ item, index }) => (
+       {loading ? <ActivityIndicator color={THEME.primary} size="large" style={{marginTop: 50}} /> : (
+           <FlatList data={leaders} keyExtractor={(item, i) => i.toString()} renderItem={({ item, index }) => (
                  <View style={styles.scoreRow}>
                     <Text style={styles.rank}>#{index + 1}</Text>
                     <Text style={styles.name}>{item.profiles ? item.profiles.username : 'Anon'}</Text>
-                    <Text style={styles.scoreVal}>
-                       {sortBy === 'time' ? `${item.time_seconds}s` : `${item.guesses_count} tries`}
-                    </Text>
+                    <Text style={styles.scoreVal}>{sortBy === 'time' ? `${item.time_seconds}s` : `${item.guesses_count} tries`}</Text>
                  </View>
-              )} 
-              ListEmptyComponent={<Text style={{color:'#666', textAlign:'center', marginTop:20}}>No scores yet. Be the first!</Text>}
-           />
+              )} ListEmptyComponent={<Text style={{color:'#666', textAlign:'center', marginTop:20}}>No scores yet. Be the first!</Text>} />
        )}
     </SafeAreaView>
   );
@@ -498,34 +517,19 @@ function HistoryScreen() {
   const [history, setMyHistory] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Fetches data every time you look at the screen!
-  useFocusEffect(
-    useCallback(() => {
-      if (session) fetchMyHistory();
-    }, [session])
-  );
+  useFocusEffect(useCallback(() => { if (session) fetchMyHistory(); }, [session]));
 
   const fetchMyHistory = async () => {
     setLoading(true); 
-    const { data } = await supabase
-      .from('leaderboards')
-      .select('*')
-      .eq('user_id', session.user.id)
-      .order('created_at', { ascending: false })
-      .limit(50);
-      
+    const { data } = await supabase.from('leaderboards').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(50);
     if (data) setMyHistory(data);
     setLoading(false);
   };
 
   return (
     <SafeAreaView style={styles.screenContainer}>
-       <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.backLink}>
-           <Text style={styles.linkText}>☰ Menu</Text>
-       </TouchableOpacity>
+       <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
        <Text style={styles.title}>My Game History</Text>
-       
-       {/* 👇 NEW: The Column Headers 👇 */}
        {!loading && history.length > 0 && (
          <View style={styles.historyHeaderRow}>
             <Text style={[styles.historyHeaderText, {width: 30}]}>#</Text>
@@ -534,35 +538,15 @@ function HistoryScreen() {
             <Text style={[styles.historyHeaderText, {flex: 1, textAlign: 'center'}]}>Tries</Text>
          </View>
        )}
-
-       {loading ? (
-           <ActivityIndicator color={THEME.primary} size="large" style={{marginTop: 50}} /> 
-       ) : (
-           <FlatList 
-              data={history} 
-              keyExtractor={item => item.id.toString()} 
-              // 👇 NEW: We added 'index' here to grab the row number!
-              renderItem={({item, index}) => (
+       {loading ? <ActivityIndicator color={THEME.primary} size="large" style={{marginTop: 50}} /> : (
+           <FlatList data={history} keyExtractor={item => item.id.toString()} renderItem={({item, index}) => (
                 <View style={styles.historyCardGrid}>
-                   {/* Column 1: Index Number */}
                    <Text style={styles.historyIndex}>{index + 1}</Text>
-                   
-                   {/* Column 2: Game Mode */}
-                   <View style={{flex: 1, alignItems: 'center'}}>
-                      <View style={styles.historyBadge}>
-                         <Text style={styles.historyBadgeText}>{item.difficulty}</Text>
-                      </View>
-                   </View>
-                   
-                   {/* Column 3: Time */}
+                   <View style={{flex: 1, alignItems: 'center'}}><View style={styles.historyBadge}><Text style={styles.historyBadgeText}>{item.difficulty}</Text></View></View>
                    <Text style={[styles.historyCardText, {flex: 1, textAlign: 'center'}]}>⏳ {item.time_seconds}s</Text>
-                   
-                   {/* Column 4: Tries */}
                    <Text style={[styles.historyCardText, {flex: 1, textAlign: 'center'}]}>#️⃣ {item.guesses_count}</Text>
                 </View>
-              )} 
-              ListEmptyComponent={<Text style={{color:'#666', textAlign:'center', marginTop:20}}>No games played yet.</Text>} 
-           />
+              )} ListEmptyComponent={<Text style={{color:'#666', textAlign:'center', marginTop:20}}>No games played yet.</Text>} />
        )}
     </SafeAreaView>
   );
@@ -602,33 +586,49 @@ function PrivacyScreen() {
   );
 }
 
-const Drawer = createDrawerNavigator();
+
+// ==========================================
+// 5. MAIN ARCHITECTURE
+// ==========================================
+
+// Holds all the Drawer screens
+function MainDrawerApp() {
+  return (
+    <Drawer.Navigator initialRouteName="Home" drawerContent={(props) => <CustomDrawerContent {...props} />} screenOptions={{ headerShown: false, drawerStyle: { backgroundColor: THEME.drawerBg, width: 280 }, drawerActiveTintColor: THEME.primary, drawerInactiveTintColor: THEME.text, sceneContainerStyle: { backgroundColor: THEME.bg } }}>
+      <Drawer.Screen name="Home" component={GameScreen} options={{ drawerIcon: ({color}) => <Ionicons name="game-controller-outline" size={22} color={color} /> }}/>
+      <Drawer.Screen name="Profile" component={ProfileScreen} options={{ drawerIcon: ({color}) => <Ionicons name="person-outline" size={22} color={color} /> }}/>
+      <Drawer.Screen name="Leaderboard" component={LeaderboardScreen} options={{ drawerIcon: ({color}) => <Ionicons name="trophy-outline" size={22} color={color} /> }}/>
+      <Drawer.Screen name="History" component={HistoryScreen} options={{ drawerIcon: ({color}) => <Ionicons name="time-outline" size={22} color={color} /> }}/>
+      <Drawer.Screen name="How to Play" component={RulesScreen} options={{ drawerIcon: ({color}) => <Ionicons name="help-circle-outline" size={22} color={color} /> }}/>
+      <Drawer.Screen name="Privacy" component={PrivacyScreen} options={{ drawerIcon: ({color}) => <Ionicons name="lock-closed-outline" size={22} color={color} /> }}/>
+    </Drawer.Navigator>
+  );
+}
 
 export default function App() {
   const [session, setSession] = useState(null);
   const [username, setUsername] = useState('');
+  const [isAppReady, setIsAppReady] = useState(false); // 👇 Prevents flashing
 
-  // 👇 UPDATED AUTH LISTENER 👇
   useEffect(() => {
-    // 1. Check initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Check initial session
+    const initApp = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
       setSession(session);
-      if (session) fetchProfile(session.user.id);
-      else supabase.auth.signInAnonymously();
-    });
+      
+      if (session) {
+        await fetchProfile(session.user.id);
+      } else {
+        await supabase.auth.signInAnonymously();
+      }
+      setIsAppReady(true); // App is finished loading data behind the scenes
+    };
+    
+    initApp();
 
-    // 2. Listen for Google Login success
     const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
-      if (session) {
-        // If they logged in with Google, auto-grab their Google Name and save it!
-        if (session.user.app_metadata?.provider === 'google') {
-           const googleName = session.user.user_metadata?.full_name || 'Google Player';
-           // This safely saves their name without throwing a duplicate error
-           await supabase.from('profiles').upsert({ id: session.user.id, username: googleName }, { onConflict: 'id', ignoreDuplicates: true });
-        }
-        fetchProfile(session.user.id);
-      }
+      if (session) fetchProfile(session.user.id);
     });
 
     return () => {
@@ -641,58 +641,45 @@ export default function App() {
     if (data) setUsername(data.username);
   };
 
+  // Show a blank dark screen while Supabase wakes up
+  if (!isAppReady) {
+    return <View style={{ flex: 1, backgroundColor: THEME.bg }} />;
+  }
+
   return (
     <SafeAreaProvider>
       <UserContext.Provider value={{ session, username, setUsername, fetchProfile }}>
         <NavigationContainer>
           <StatusBar barStyle="light-content" />
-          <Drawer.Navigator initialRouteName="Home" drawerContent={(props) => <CustomDrawerContent {...props} />} screenOptions={{ headerShown: false, drawerStyle: { backgroundColor: THEME.drawerBg, width: 280 }, drawerActiveTintColor: THEME.primary, drawerInactiveTintColor: THEME.text, sceneContainerStyle: { backgroundColor: THEME.bg } }}>
-            <Drawer.Screen name="Home" component={GameScreen} options={{ drawerIcon: ({color}) => <Ionicons name="game-controller-outline" size={22} color={color} /> }}/>
-            <Drawer.Screen name="Profile" component={ProfileScreen} options={{ drawerIcon: ({color}) => <Ionicons name="person-outline" size={22} color={color} /> }}/>
-            <Drawer.Screen name="Leaderboard" component={LeaderboardScreen} options={{ drawerIcon: ({color}) => <Ionicons name="trophy-outline" size={22} color={color} /> }}/>
-            <Drawer.Screen name="History" component={HistoryScreen} options={{ drawerIcon: ({color}) => <Ionicons name="time-outline" size={22} color={color} /> }}/>
-            <Drawer.Screen name="How to Play" component={RulesScreen} options={{ drawerIcon: ({color}) => <Ionicons name="help-circle-outline" size={22} color={color} /> }}/>
-            <Drawer.Screen name="Privacy" component={PrivacyScreen} options={{ drawerIcon: ({color}) => <Ionicons name="lock-closed-outline" size={22} color={color} /> }}/>
-          </Drawer.Navigator>
+          
+          {/* 👇 STACK NAVIGATOR LOGIC 👇 */}
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            {!username ? (
+              // If they don't have a username, lock them out with the Welcome screen
+              <Stack.Screen name="Welcome" component={WelcomeScreen} />
+            ) : (
+              // If they have a username, let them into the game!
+              <Stack.Screen name="Main" component={MainDrawerApp} />
+            )}
+          </Stack.Navigator>
+
         </NavigationContainer>
       </UserContext.Provider>
     </SafeAreaProvider>
   );
 }
 
+// ==========================================
+// 6. STYLES
+// ==========================================
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: THEME.bg },
   screenContainer: { flex: 1, backgroundColor: THEME.bg, padding: 20 },
-  headerRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    paddingHorizontal: 20, 
-    paddingVertical: 10,
-    marginTop: Platform.OS === 'android' ? 40 : 0
-  },
-  headerTitle: { 
-    fontSize: 24, 
-    fontWeight: '900', 
-    color: THEME.text, 
-    letterSpacing: 1, 
-    flex: 1, 
-    textAlign: 'center' 
-  },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 10, marginTop: Platform.OS === 'android' ? 40 : 0 },
+  headerTitle: { fontSize: 24, fontWeight: '900', color: THEME.text, letterSpacing: 1, flex: 1, textAlign: 'center' },
   headerSideBtn: { width: 60, height: 40, justifyContent: 'center' },
-  centerContent: {
-    flex: 1,
-    alignItems: 'center', 
-    justifyContent: 'flex-start', 
-    paddingTop: 60, 
-    width: '100%'
-  },
-  diffRow: { 
-    flexDirection: 'row', 
-    gap: 20, 
-    marginBottom: 30,
-    justifyContent: 'center' 
-  },
+  centerContent: { flex: 1, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 60, width: '100%' },
+  diffRow: { flexDirection: 'row', gap: 20, marginBottom: 30, justifyContent: 'center' },
   title: { fontSize: 28, fontWeight: 'bold', color: THEME.text, marginBottom: 20 },
   backLink: { marginBottom: 20 },
   linkText: { color: THEME.primary, fontSize: 16 },
@@ -741,34 +728,8 @@ const styles = StyleSheet.create({
   ruleHeader: { color: THEME.primary, fontSize: 18, fontWeight: 'bold', marginTop: 15, marginBottom: 5 },
   exampleBox: { backgroundColor: '#111', padding: 10, borderRadius: 10, marginVertical: 10 },
   exampleText: { color: '#FFF', fontSize: 15, marginBottom: 5 },
-  historyHeaderRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 15,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
-    marginBottom: 10,
-  },
-  historyHeaderText: {
-    color: '#888',
-    fontSize: 12,
-    fontWeight: 'bold',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  historyCardGrid: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: THEME.card,
-    paddingVertical: 15,
-    paddingHorizontal: 15,
-    borderRadius: 12,
-    marginBottom: 10,
-  },
-  historyIndex: {
-    color: '#666',
-    fontWeight: 'bold',
-    fontSize: 16,
-    width: 30,
-  },
+  historyHeaderRow: { flexDirection: 'row', paddingHorizontal: 15, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#333', marginBottom: 10 },
+  historyHeaderText: { color: '#888', fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1 },
+  historyCardGrid: { flexDirection: 'row', alignItems: 'center', backgroundColor: THEME.card, paddingVertical: 15, paddingHorizontal: 15, borderRadius: 12, marginBottom: 10 },
+  historyIndex: { color: '#666', fontWeight: 'bold', fontSize: 16, width: 30 }
 });
