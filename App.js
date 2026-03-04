@@ -30,48 +30,22 @@ const Stack = createNativeStackNavigator();
 const Drawer = createDrawerNavigator();
 
 // ==========================================
-// 1. GATEWAY: WELCOME SCREEN (UPDATED)
+// 1. GATEWAY: WELCOME SCREEN (THE PRO UX UPGRADE)
 // ==========================================
 function WelcomeScreen() {
   const { session, setUsername } = useContext(UserContext);
   const [nameInput, setNameInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [step, setStep] = useState('initial'); // 👈 Tracks which screen to show
 
-  // Helper function to check if username is unique
   const checkIsNameTaken = async (name) => {
     const { data } = await supabase.from('profiles').select('username').eq('username', name).single();
     return !!data;
   };
 
-  const handleGuestPlay = async () => {
-    if (!nameInput.trim()) return Alert.alert("Required", "Please choose a unique username!");
-    if (!session) return Alert.alert("Wait", "Initializing connection...");
-
-    setIsSaving(true);
-    const isTaken = await checkIsNameTaken(nameInput.trim());
-    
-    if (isTaken) {
-      setIsSaving(false);
-      return Alert.alert("Taken", "That username is already in use. Try another!");
-    }
-
-    const { error } = await supabase.from('profiles').upsert({ id: session.user.id, username: nameInput.trim() });
-    if (error) Alert.alert("Error", error.message);
-    else setUsername(nameInput.trim()); 
-    
-    setIsSaving(false);
-  };
-
+  // 🔘 BUTTON 1: GOOGLE LOGIN
   const handleGoogleLogin = async () => {
-    if (!nameInput.trim()) return Alert.alert("Required", "Please choose a unique username first!");
-    
     setIsSaving(true);
-    const isTaken = await checkIsNameTaken(nameInput.trim());
-    
-    if (isTaken) {
-      setIsSaving(false);
-      return Alert.alert("Taken", "That username is already in use. Try another!");
-    }
 
     try {
       const redirectUrl = Linking.createURL('');
@@ -101,8 +75,16 @@ function WelcomeScreen() {
               const { data: sessionData, error: sessionError } = await supabase.auth.setSession({ access_token, refresh_token });
               if (sessionError) throw sessionError;
               
-              await supabase.from('profiles').upsert({ id: sessionData.session.user.id, username: nameInput.trim() });
-              setUsername(nameInput.trim()); 
+              // Check if they are a returning user
+              const { data: profile } = await supabase.from('profiles').select('username').eq('id', sessionData.session.user.id).single();
+
+              if (profile && profile.username) {
+                 // 🎉 RETURNING USER: Let them straight in!
+                 setUsername(profile.username);
+              } else {
+                 // 🆕 NEW USER: Flip the screen to ask for a username
+                 setStep('name');
+              }
            }
         }
       }
@@ -113,31 +95,83 @@ function WelcomeScreen() {
     }
   };
 
+  // 🔘 BUTTON 2: PLAY AS GUEST
+  const handleGuestPlay = () => {
+    // Just flip the screen to ask for a username!
+    setStep('name');
+  };
+
+  // 🔘 THE SUBMIT BUTTON (For both Google and Guest new users)
+  const handleSubmitName = async () => {
+    if (!nameInput.trim()) return Alert.alert("Required", "Please choose a username!");
+    if (!session) return Alert.alert("Wait", "Initializing connection...");
+
+    setIsSaving(true);
+    const isTaken = await checkIsNameTaken(nameInput.trim());
+    
+    if (isTaken) {
+      setIsSaving(false);
+      return Alert.alert("Taken", "That username is already in use. Try another!");
+    }
+
+    // Save the name to whoever is currently logged in (Google or Anonymous Guest)
+    const { error } = await supabase.from('profiles').upsert({ id: session.user.id, username: nameInput.trim() });
+    
+    if (error) Alert.alert("Error", error.message);
+    else setUsername(nameInput.trim()); // Unlocks the main app!
+    
+    setIsSaving(false);
+  };
+
   return (
-    // 👇 FIXED: Added screenContainer for the dark background, and centered vertically
-    <SafeAreaView style={[styles.screenContainer, { justifyContent: 'center' }]}>
-      <View style={{ width: '100%', alignItems: 'center', paddingBottom: 50 }}>
-        <Text style={[styles.headerTitle, { fontSize: 40, marginBottom: 10 }]}>PlaceNDigits</Text>
-        <Text style={{ color: THEME.textDim, marginBottom: 40, fontSize: 16 }}>Pick a unique identity to start playing.</Text>
+    <SafeAreaView style={styles.screenContainer}>
+      
+      {/* ⬆️ PINNED TO THE TOP ⬆️ */}
+      <View style={{ width: '100%', alignItems: 'center', marginTop: Platform.OS === 'android' ? 40 : 20 }}>
+        <Text style={{ fontSize: 42, fontWeight: '900', color: THEME.text, letterSpacing: 2 }}>
+          PlaceNDigits
+        </Text>
+      </View>
 
-        <View style={{ width: '100%', marginBottom: 30 }}>
-          {/* 👇 FIXED: Removed the external label, updated the placeholder text */}
-          <TextInput 
-            style={[styles.input, { width: '100%', marginBottom: 20, textAlign: 'center', fontSize: 20 }]} 
-            placeholder="Choose a username" 
-            placeholderTextColor="#777" 
-            value={nameInput} 
-            onChangeText={setNameInput} 
-          />
+      {/* 🎯 CENTERED IN THE MIDDLE 🎯 */}
+      <View style={{ flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center', paddingBottom: 60 }}>
+        <Text style={{ color: THEME.textDim, marginBottom: 40, fontSize: 16 }}>
+           {step === 'initial' ? "Sign in or play as a guest." : "Pick a unique identity to start playing."}
+        </Text>
 
-          <TouchableOpacity style={[styles.startButton, { backgroundColor: THEME.google, marginBottom: 15 }]} onPress={handleGoogleLogin}>
-            {isSaving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>🌐 Sign in with Google</Text>}
-          </TouchableOpacity>
+        {step === 'initial' ? (
+          // 📺 SCREEN 1: THE CHOICES
+          <View style={{ width: '100%', marginBottom: 30 }}>
+            <TouchableOpacity style={[styles.startButton, { backgroundColor: THEME.google, marginBottom: 15 }]} onPress={handleGoogleLogin}>
+              {isSaving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>🌐 Sign in with Google</Text>}
+            </TouchableOpacity>
 
-          <TouchableOpacity style={[styles.helpButtonLarge, { backgroundColor: THEME.card }]} onPress={handleGuestPlay}>
-            {isSaving ? <ActivityIndicator color="#FFF" /> : <Text style={[styles.btnText, { color: THEME.textDim }]}>Play as Guest</Text>}
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity style={[styles.helpButtonLarge, { backgroundColor: THEME.card }]} onPress={handleGuestPlay}>
+              <Text style={[styles.btnText, { color: THEME.textDim }]}>Play as Guest</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          // 📺 SCREEN 2: THE USERNAME INPUT
+          <View style={{ width: '100%', marginBottom: 30 }}>
+            <TextInput 
+              style={[styles.input, { width: '100%', marginBottom: 20, textAlign: 'center', fontSize: 20 }]} 
+              placeholder="Choose a username" 
+              placeholderTextColor="#777" 
+              value={nameInput} 
+              onChangeText={setNameInput} 
+              autoFocus
+            />
+
+            <TouchableOpacity style={[styles.startButton, { backgroundColor: THEME.success, marginBottom: 15 }]} onPress={handleSubmitName}>
+              {isSaving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>Continue</Text>}
+            </TouchableOpacity>
+
+            {/* Back button */}
+            <TouchableOpacity onPress={() => setStep('initial')} style={{alignItems: 'center', padding: 10}}>
+                <Text style={{color: THEME.textDim, fontSize: 16}}>← Back</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     </SafeAreaView>
   );

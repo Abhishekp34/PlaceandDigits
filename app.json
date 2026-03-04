@@ -3,7 +3,7 @@
     "name": "PlaceandDigits",
     "slug": "PlaceandDigits",
     "scheme": "placeanddigits",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.abhishek.placeanddigits",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "userInterfaceStyle": "dark",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
