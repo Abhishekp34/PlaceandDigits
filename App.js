@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
+import * as AppleAuthentication from 'expo-apple-authentication';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -142,6 +143,57 @@ function WelcomeScreen() {
         {step === 'initial' ? (
           // 📺 SCREEN 1: THE CHOICES
           <View style={{ width: '100%', marginBottom: 30 }}>
+            
+            {/* 👇 THE NEW APPLE BUTTON 👇 */}
+            {Platform.OS === 'ios' && (
+              <AppleAuthentication.AppleAuthenticationButton
+                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                cornerRadius={16}
+                style={{ width: '100%', height: 55, marginBottom: 15 }}
+                onPress={async () => {
+                  try {
+                    setIsSaving(true);
+                    const credential = await AppleAuthentication.signInAsync({
+                      requestedScopes: [
+                        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+                        AppleAuthentication.AppleAuthenticationScope.EMAIL,
+                      ],
+                    });
+                    
+                    // 1. Hand the Apple token to Supabase
+                    if (credential.identityToken) {
+                      const { data, error } = await supabase.auth.signInWithIdToken({
+                        provider: 'apple',
+                        token: credential.identityToken,
+                      });
+
+                      if (error) throw error;
+
+                      // 2. Check if they are a returning user
+                      const { data: profile } = await supabase.from('profiles').select('username').eq('id', data.session.user.id).single();
+
+                      if (profile && profile.username) {
+                         // 🎉 RETURNING USER: Let them straight in!
+                         setUsername(profile.username);
+                      } else {
+                         // 🆕 NEW USER: Flip the screen to ask for a username
+                         setStep('name');
+                      }
+                    } else {
+                      throw new Error("No identity token provided by Apple.");
+                    }
+                  } catch (e) {
+                    if (e.code !== 'ERR_REQUEST_CANCELED') {
+                      Alert.alert("Apple Login Error", e.message);
+                    }
+                  } finally {
+                    setIsSaving(false);
+                  }
+                }}
+              />
+            )}
+
             <TouchableOpacity style={[styles.startButton, { backgroundColor: THEME.google, marginBottom: 15 }]} onPress={handleGoogleLogin}>
               {isSaving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>🌐 Sign in with Google</Text>}
             </TouchableOpacity>
@@ -416,6 +468,31 @@ function ProfileScreen() {
        Alert.alert("Success", "Username updated!");
     }
   };
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      "Delete Account",
+      "Are you sure you want to permanently delete your account? This action cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            // 1. Call the Supabase RPC function we just created
+            const { error } = await supabase.rpc('delete_user');
+            
+            if (error) {
+              Alert.alert("Error deleting account", error.message);
+            } else {
+              // 2. Log them out to clear the app's local memory and return to the Welcome screen
+              await supabase.auth.signOut();
+              setUsername('');
+            }
+          }
+        }
+      ]
+    );
+  };
 
   // 👇 NEW: Allows a guest to link their Google Account from the profile screen!
   const handleLinkGoogle = async () => {
@@ -487,12 +564,19 @@ function ProfileScreen() {
                    <Text style={styles.btnText}>✏️ Edit Username</Text>
                </TouchableOpacity>
 
-               {/* 👇 If they are a guest, show the Link Google button! 👇 */}
                {isGuest && (
                  <TouchableOpacity style={[styles.startButton, {backgroundColor: THEME.google, marginTop: 20}]} onPress={handleLinkGoogle}>
                      {loading ? <ActivityIndicator color="#FFF"/> : <Text style={styles.btnText}>🌐 Link Google Account</Text>}
                  </TouchableOpacity>
                )}
+
+               {/* 👇 THE NEW DELETE BUTTON 👇 */}
+               <TouchableOpacity 
+                 style={[styles.startButton, {backgroundColor: 'transparent', borderWidth: 1, borderColor: THEME.danger, marginTop: 40}]} 
+                 onPress={handleDeleteAccount}
+               >
+                   <Text style={[styles.btnText, {color: THEME.danger}]}>🗑️ Delete Account</Text>
+               </TouchableOpacity>
            </View>
        )}
     </SafeAreaView>

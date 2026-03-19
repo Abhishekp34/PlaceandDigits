@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.abhishek.placeanddigits",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "userInterfaceStyle": "dark",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
