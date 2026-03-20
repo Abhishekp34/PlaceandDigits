@@ -97,8 +97,13 @@ function WelcomeScreen() {
   };
 
   // 🔘 BUTTON 2: PLAY AS GUEST
-  const handleGuestPlay = () => {
-    // Just flip the screen to ask for a username!
+  const handleGuestPlay = async () => {
+    // If they somehow don't have a session, create an anonymous one before moving forward
+    if (!session) {
+      await supabase.auth.signInAnonymously();
+    }
+    
+    // Flip the screen to ask for a username
     setStep('name');
   };
 
