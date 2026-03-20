@@ -446,8 +446,11 @@ function ProfileScreen() {
   const [isEditing, setIsEditing] = useState(false); 
   const navigation = useNavigation();
 
-  // Checks if the user is a Guest by looking at their login provider
-  const isGuest = session?.user?.app_metadata?.provider !== 'google';
+  // Look at the array of all connected providers (fallback to empty array if none)
+  const activeProviders = session?.user?.app_metadata?.providers || [];
+  
+  // They are only a guest if BOTH Google and Apple are missing from that array
+  const isGuest = !activeProviders.includes('google') && !activeProviders.includes('apple');
 
   useEffect(() => { setInputText(username || ''); }, [username]);
 
@@ -494,7 +497,7 @@ function ProfileScreen() {
     );
   };
 
-  // 👇 NEW: Allows a guest to link their Google Account from the profile screen!
+  // Allows a guest to link their Google Account from the profile screen!
   const handleLinkGoogle = async () => {
     setLoading(true);
     try {
@@ -538,6 +541,40 @@ function ProfileScreen() {
     }
   };
 
+  // Allows a guest to link their Apple Account from the profile screen!
+  const handleLinkApple = async () => {
+    setLoading(true);
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      
+      if (credential.identityToken) {
+        // Hand the token to Supabase. Because they are currently a Guest, 
+        // Supabase will automatically upgrade their current Guest ID to an Apple ID!
+        const { data, error } = await supabase.auth.signInWithIdToken({
+          provider: 'apple',
+          token: credential.identityToken,
+        });
+
+        if (error) throw error;
+        
+        // Ensure their unique username is safely preserved
+        await supabase.from('profiles').upsert({ id: data.session.user.id, username });
+        Alert.alert("Success!", "Your Apple account has been permanently linked.");
+      }
+    } catch (e) {
+      if (e.code !== 'ERR_REQUEST_CANCELED') {
+        Alert.alert("Link Error", e.message);
+      }
+    } finally {
+      setLoading(false); 
+    }
+  };
+
   return (
     <SafeAreaView style={styles.screenContainer}>
        <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.backLink}>
@@ -564,10 +601,24 @@ function ProfileScreen() {
                    <Text style={styles.btnText}>✏️ Edit Username</Text>
                </TouchableOpacity>
 
+               {/* 👇 If they are a guest, show BOTH link buttons! 👇 */}
                {isGuest && (
-                 <TouchableOpacity style={[styles.startButton, {backgroundColor: THEME.google, marginTop: 20}]} onPress={handleLinkGoogle}>
-                     {loading ? <ActivityIndicator color="#FFF"/> : <Text style={styles.btnText}>🌐 Link Google Account</Text>}
-                 </TouchableOpacity>
+                 <View style={{ width: '100%', marginTop: 20 }}>
+                   
+                   {Platform.OS === 'ios' && (
+                     <AppleAuthentication.AppleAuthenticationButton
+                       buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                       buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                       cornerRadius={16}
+                       style={{ width: '100%', height: 55, marginBottom: 15 }}
+                       onPress={handleLinkApple}
+                     />
+                   )}
+
+                   <TouchableOpacity style={[styles.startButton, {backgroundColor: THEME.google, marginBottom: 0}]} onPress={handleLinkGoogle}>
+                       {loading ? <ActivityIndicator color="#FFF"/> : <Text style={styles.btnText}>🌐 Link Google Account</Text>}
+                   </TouchableOpacity>
+                 </View>
                )}
 
                {/* 👇 THE NEW DELETE BUTTON 👇 */}
