@@ -3,7 +3,7 @@ import React, { useState, useEffect, useContext, createContext, useCallback } fr
 import { 
   StyleSheet, Text, View, TextInput, TouchableOpacity, FlatList, 
   Alert, ActivityIndicator, KeyboardAvoidingView, Platform, 
-  StatusBar, Keyboard, ScrollView, Linking as RNLinking 
+  StatusBar, Keyboard, ScrollView, Animated, Dimensions, Linking as RNLinking 
 } from 'react-native';
 import { NavigationContainer, useNavigation, useFocusEffect } from '@react-navigation/native';
 import { createDrawerNavigator, DrawerContentScrollView, DrawerItemList } from '@react-navigation/drawer';
@@ -26,28 +26,82 @@ const THEME = {
   gold: '#FFD700', drawerBg: '#1A1A1A', google: '#4285F4' 
 };
 
+// ==========================================
+// 🌟 BACKGROUND ANIMATION 
+// ==========================================
+const { width, height } = Dimensions.get('window');
+const FALLING_COUNT = 60; 
+const FALLING_COLORS = [THEME.primary, THEME.success, THEME.danger, THEME.gold, '#BF5AF2', '#FF9F0A'];
+
+const FallingDigit = () => {
+  const translateY = React.useRef(new Animated.Value(-50)).current;
+  
+  const randomX = React.useRef(Math.random() * width).current;
+  const randomDuration = React.useRef(Math.random() * 5000 + 4000).current; 
+  const randomDelay = React.useRef(Math.random() * 5000).current; 
+  const randomSize = React.useRef(Math.random() * 50 + 20).current; 
+  const randomColor = React.useRef(FALLING_COLORS[Math.floor(Math.random() * FALLING_COLORS.length)]).current;
+  const randomDigit = React.useRef(Math.floor(Math.random() * 10)).current; 
+  const randomOpacity = React.useRef(Math.random() * 0.3 + 0.1).current; 
+
+  React.useEffect(() => {
+    Animated.loop(
+      Animated.timing(translateY, {
+        toValue: height + 50, 
+        duration: randomDuration,
+        delay: randomDelay,
+        useNativeDriver: true, 
+      })
+    ).start();
+  }, []);
+
+  return (
+    <Animated.Text
+      style={{
+        position: 'absolute',
+        left: randomX,
+        transform: [{ translateY }],
+        fontSize: randomSize,
+        color: randomColor,
+        opacity: randomOpacity,
+        fontWeight: '900',
+      }}
+    >
+      {randomDigit}
+    </Animated.Text>
+  );
+};
+
+const FallingBackground = () => {
+  return (
+    <View style={[StyleSheet.absoluteFillObject, { overflow: 'hidden', zIndex: -1 }]} pointerEvents="none">
+      {[...Array(FALLING_COUNT)].map((_, i) => (
+        <FallingDigit key={i} />
+      ))}
+    </View>
+  );
+};
+
 const UserContext = createContext();
 const Stack = createNativeStackNavigator();
 const Drawer = createDrawerNavigator();
 
 // ==========================================
-// 1. GATEWAY: WELCOME SCREEN (THE PRO UX UPGRADE)
+// 1. GATEWAY: WELCOME SCREEN
 // ==========================================
 function WelcomeScreen() {
   const { session, setUsername } = useContext(UserContext);
   const [nameInput, setNameInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [step, setStep] = useState('initial'); // 👈 Tracks which screen to show
+  const [step, setStep] = useState('initial'); 
 
   const checkIsNameTaken = async (name) => {
     const { data } = await supabase.from('profiles').select('username').eq('username', name).single();
     return !!data;
   };
 
-  // 🔘 BUTTON 1: GOOGLE LOGIN
   const handleGoogleLogin = async () => {
     setIsSaving(true);
-
     try {
       const redirectUrl = Linking.createURL('');
       const { data, error } = await supabase.auth.signInWithOAuth({ 
@@ -76,14 +130,11 @@ function WelcomeScreen() {
               const { data: sessionData, error: sessionError } = await supabase.auth.setSession({ access_token, refresh_token });
               if (sessionError) throw sessionError;
               
-              // Check if they are a returning user
               const { data: profile } = await supabase.from('profiles').select('username').eq('id', sessionData.session.user.id).single();
 
               if (profile && profile.username) {
-                 // 🎉 RETURNING USER: Let them straight in!
                  setUsername(profile.username);
               } else {
-                 // 🆕 NEW USER: Flip the screen to ask for a username
                  setStep('name');
               }
            }
@@ -96,18 +147,13 @@ function WelcomeScreen() {
     }
   };
 
-  // 🔘 BUTTON 2: PLAY AS GUEST
   const handleGuestPlay = async () => {
-    // If they somehow don't have a session, create an anonymous one before moving forward
     if (!session) {
       await supabase.auth.signInAnonymously();
     }
-    
-    // Flip the screen to ask for a username
     setStep('name');
   };
 
-  // 🔘 THE SUBMIT BUTTON (For both Google and Guest new users)
   const handleSubmitName = async () => {
     if (!nameInput.trim()) return Alert.alert("Required", "Please choose a username!");
     if (!session) return Alert.alert("Wait", "Initializing connection...");
@@ -120,36 +166,31 @@ function WelcomeScreen() {
       return Alert.alert("Taken", "That username is already in use. Try another!");
     }
 
-    // Save the name to whoever is currently logged in (Google or Anonymous Guest)
     const { error } = await supabase.from('profiles').upsert({ id: session.user.id, username: nameInput.trim() });
     
     if (error) Alert.alert("Error", error.message);
-    else setUsername(nameInput.trim()); // Unlocks the main app!
+    else setUsername(nameInput.trim()); 
     
     setIsSaving(false);
   };
 
   return (
     <SafeAreaView style={styles.screenContainer}>
+      <FallingBackground />
       
-      {/* ⬆️ PINNED TO THE TOP ⬆️ */}
       <View style={{ width: '100%', alignItems: 'center', marginTop: Platform.OS === 'android' ? 40 : 20 }}>
         <Text style={{ fontSize: 42, fontWeight: '900', color: THEME.text, letterSpacing: 2 }}>
           PlaceNDigits
         </Text>
       </View>
 
-      {/* 🎯 CENTERED IN THE MIDDLE 🎯 */}
       <View style={{ flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center', paddingBottom: 60 }}>
         <Text style={{ color: THEME.textDim, marginBottom: 40, fontSize: 16 }}>
            {step === 'initial' ? "Sign in or play as a guest." : "Pick a unique identity to start playing."}
         </Text>
 
         {step === 'initial' ? (
-          // 📺 SCREEN 1: THE CHOICES
           <View style={{ width: '100%', marginBottom: 30 }}>
-            
-            {/* 👇 THE NEW APPLE BUTTON 👇 */}
             {Platform.OS === 'ios' && (
               <AppleAuthentication.AppleAuthenticationButton
                 buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
@@ -166,7 +207,6 @@ function WelcomeScreen() {
                       ],
                     });
                     
-                    // 1. Hand the Apple token to Supabase
                     if (credential.identityToken) {
                       const { data, error } = await supabase.auth.signInWithIdToken({
                         provider: 'apple',
@@ -175,14 +215,11 @@ function WelcomeScreen() {
 
                       if (error) throw error;
 
-                      // 2. Check if they are a returning user
                       const { data: profile } = await supabase.from('profiles').select('username').eq('id', data.session.user.id).single();
 
                       if (profile && profile.username) {
-                         // 🎉 RETURNING USER: Let them straight in!
                          setUsername(profile.username);
                       } else {
-                         // 🆕 NEW USER: Flip the screen to ask for a username
                          setStep('name');
                       }
                     } else {
@@ -208,7 +245,6 @@ function WelcomeScreen() {
             </TouchableOpacity>
           </View>
         ) : (
-          // 📺 SCREEN 2: THE USERNAME INPUT
           <View style={{ width: '100%', marginBottom: 30 }}>
             <TextInput 
               style={[styles.input, { width: '100%', marginBottom: 20, textAlign: 'center', fontSize: 20 }]} 
@@ -223,7 +259,6 @@ function WelcomeScreen() {
               {isSaving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>Continue</Text>}
             </TouchableOpacity>
 
-            {/* Back button */}
             <TouchableOpacity onPress={() => setStep('initial')} style={{alignItems: 'center', padding: 10}}>
                 <Text style={{color: THEME.textDim, fontSize: 16}}>← Back</Text>
             </TouchableOpacity>
@@ -280,7 +315,7 @@ function CustomDrawerContent(props) {
 }
 
 // ==========================================
-// 3. MAIN GAME SCREEN (CLEANED UP)
+// 3. MAIN GAME SCREEN 
 // ==========================================
 function GameScreen() {
   const { session, username } = useContext(UserContext);
@@ -358,6 +393,10 @@ function GameScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      
+      {/* 👇 FALLING BACKGROUND (Shows on Home OR Win Screen!) 👇 */}
+      {(gameState === 'idle' || gameState === 'won') && <FallingBackground />}
+
       <View style={styles.headerRow}>
         <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.headerSideBtn}>
           <Ionicons name="menu" size={32} color={THEME.text} />
@@ -442,7 +481,7 @@ function GameScreen() {
 }
 
 // ==========================================
-// 4. OTHER SCREENS (Profile, Leaderboard, etc)
+// 4. OTHER SCREENS 
 // ==========================================
 function ProfileScreen() {
   const { session, username, setUsername } = useContext(UserContext);
@@ -451,10 +490,7 @@ function ProfileScreen() {
   const [isEditing, setIsEditing] = useState(false); 
   const navigation = useNavigation();
 
-  // Look at the array of all connected providers (fallback to empty array if none)
   const activeProviders = session?.user?.app_metadata?.providers || [];
-  
-  // They are only a guest if BOTH Google and Apple are missing from that array
   const isGuest = !activeProviders.includes('google') && !activeProviders.includes('apple');
 
   useEffect(() => { setInputText(username || ''); }, [username]);
@@ -486,13 +522,10 @@ function ProfileScreen() {
           text: "Delete",
           style: "destructive",
           onPress: async () => {
-            // 1. Call the Supabase RPC function we just created
             const { error } = await supabase.rpc('delete_user');
-            
             if (error) {
               Alert.alert("Error deleting account", error.message);
             } else {
-              // 2. Log them out to clear the app's local memory and return to the Welcome screen
               await supabase.auth.signOut();
               setUsername('');
             }
@@ -502,7 +535,6 @@ function ProfileScreen() {
     );
   };
 
-  // Allows a guest to link their Google Account from the profile screen!
   const handleLinkGoogle = async () => {
     setLoading(true);
     try {
@@ -533,7 +565,6 @@ function ProfileScreen() {
               const { data: sessionData, error: sessionError } = await supabase.auth.setSession({ access_token, refresh_token });
               if (sessionError) throw sessionError;
               
-              // Ensure their unique username is preserved
               await supabase.from('profiles').upsert({ id: sessionData.session.user.id, username });
               Alert.alert("Success!", "Your Google account has been permanently linked.");
            }
@@ -546,7 +577,6 @@ function ProfileScreen() {
     }
   };
 
-  // Allows a guest to link their Apple Account from the profile screen!
   const handleLinkApple = async () => {
     setLoading(true);
     try {
@@ -558,8 +588,6 @@ function ProfileScreen() {
       });
       
       if (credential.identityToken) {
-        // Hand the token to Supabase. Because they are currently a Guest, 
-        // Supabase will automatically upgrade their current Guest ID to an Apple ID!
         const { data, error } = await supabase.auth.signInWithIdToken({
           provider: 'apple',
           token: credential.identityToken,
@@ -567,7 +595,6 @@ function ProfileScreen() {
 
         if (error) throw error;
         
-        // Ensure their unique username is safely preserved
         await supabase.from('profiles').upsert({ id: data.session.user.id, username });
         Alert.alert("Success!", "Your Apple account has been permanently linked.");
       }
@@ -606,7 +633,6 @@ function ProfileScreen() {
                    <Text style={styles.btnText}>✏️ Edit Username</Text>
                </TouchableOpacity>
 
-               {/* 👇 If they are a guest, show BOTH link buttons! 👇 */}
                {isGuest && (
                  <View style={{ width: '100%', marginTop: 20 }}>
                    
@@ -626,7 +652,6 @@ function ProfileScreen() {
                  </View>
                )}
 
-               {/* 👇 THE NEW DELETE BUTTON 👇 */}
                <TouchableOpacity 
                  style={[styles.startButton, {backgroundColor: 'transparent', borderWidth: 1, borderColor: THEME.danger, marginTop: 40}]} 
                  onPress={handleDeleteAccount}
@@ -765,7 +790,6 @@ function PrivacyScreen() {
 // 5. MAIN ARCHITECTURE
 // ==========================================
 
-// Holds all the Drawer screens
 function MainDrawerApp() {
   return (
     <Drawer.Navigator initialRouteName="Home" drawerContent={(props) => <CustomDrawerContent {...props} />} screenOptions={{ headerShown: false, drawerStyle: { backgroundColor: THEME.drawerBg, width: 280 }, drawerActiveTintColor: THEME.primary, drawerInactiveTintColor: THEME.text, sceneContainerStyle: { backgroundColor: THEME.bg } }}>
@@ -782,10 +806,9 @@ function MainDrawerApp() {
 export default function App() {
   const [session, setSession] = useState(null);
   const [username, setUsername] = useState('');
-  const [isAppReady, setIsAppReady] = useState(false); // 👇 Prevents flashing
+  const [isAppReady, setIsAppReady] = useState(false); 
 
   useEffect(() => {
-    // Check initial session
     const initApp = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       setSession(session);
@@ -795,7 +818,7 @@ export default function App() {
       } else {
         await supabase.auth.signInAnonymously();
       }
-      setIsAppReady(true); // App is finished loading data behind the scenes
+      setIsAppReady(true); 
     };
     
     initApp();
@@ -815,7 +838,6 @@ export default function App() {
     if (data) setUsername(data.username);
   };
 
-  // Show a blank dark screen while Supabase wakes up
   if (!isAppReady) {
     return <View style={{ flex: 1, backgroundColor: THEME.bg }} />;
   }
@@ -826,13 +848,10 @@ export default function App() {
         <NavigationContainer>
           <StatusBar barStyle="light-content" />
           
-          {/* 👇 STACK NAVIGATOR LOGIC 👇 */}
           <Stack.Navigator screenOptions={{ headerShown: false }}>
             {!username ? (
-              // If they don't have a username, lock them out with the Welcome screen
               <Stack.Screen name="Welcome" component={WelcomeScreen} />
             ) : (
-              // If they have a username, let them into the game!
               <Stack.Screen name="Main" component={MainDrawerApp} />
             )}
           </Stack.Navigator>
