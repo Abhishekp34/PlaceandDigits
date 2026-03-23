@@ -6,7 +6,7 @@ import {
   StatusBar, Keyboard, ScrollView, Animated, Dimensions, Linking as RNLinking 
 } from 'react-native';
 import { NavigationContainer, useNavigation, useFocusEffect } from '@react-navigation/native';
-import { createDrawerNavigator, DrawerContentScrollView, DrawerItemList } from '@react-navigation/drawer';
+import { createDrawerNavigator, DrawerContentScrollView, DrawerItemList, DrawerItem } from '@react-navigation/drawer';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context'; 
 import { supabase } from './supabase'; 
@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import { SoundProvider, SoundContext } from './SoundEngine';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -26,16 +27,15 @@ const THEME = {
   gold: '#FFD700', drawerBg: '#1A1A1A', google: '#4285F4' 
 };
 
-// ==========================================
-// 🌟 BACKGROUND ANIMATION 
-// ==========================================
+// =====================================================================
+// 🌟 1. BACKGROUND ANIMATION ENGINE (The Matrix Falling Numbers)
+// =====================================================================
 const { width, height } = Dimensions.get('window');
 const FALLING_COUNT = 60; 
 const FALLING_COLORS = [THEME.primary, THEME.success, THEME.danger, THEME.gold, '#BF5AF2', '#FF9F0A'];
 
 const FallingDigit = () => {
   const translateY = React.useRef(new Animated.Value(-50)).current;
-  
   const randomX = React.useRef(Math.random() * width).current;
   const randomDuration = React.useRef(Math.random() * 5000 + 4000).current; 
   const randomDelay = React.useRef(Math.random() * 5000).current; 
@@ -56,17 +56,7 @@ const FallingDigit = () => {
   }, []);
 
   return (
-    <Animated.Text
-      style={{
-        position: 'absolute',
-        left: randomX,
-        transform: [{ translateY }],
-        fontSize: randomSize,
-        color: randomColor,
-        opacity: randomOpacity,
-        fontWeight: '900',
-      }}
-    >
+    <Animated.Text style={{ position: 'absolute', left: randomX, transform: [{ translateY }], fontSize: randomSize, color: randomColor, opacity: randomOpacity, fontWeight: '900' }}>
       {randomDigit}
     </Animated.Text>
   );
@@ -82,15 +72,19 @@ const FallingBackground = () => {
   );
 };
 
+// =====================================================================
+// 🛠 2. APP SETUP & CONTEXTS (The Global Tools)
+// =====================================================================
 const UserContext = createContext();
 const Stack = createNativeStackNavigator();
 const Drawer = createDrawerNavigator();
 
-// ==========================================
-// 1. GATEWAY: WELCOME SCREEN
-// ==========================================
+// =====================================================================
+// 🚪 3. WELCOME SCREEN (Login / Guest / Registration)
+// =====================================================================
 function WelcomeScreen() {
   const { session, setUsername } = useContext(UserContext);
+  const { playSound } = useContext(SoundContext);
   const [nameInput, setNameInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [step, setStep] = useState('initial'); 
@@ -101,17 +95,13 @@ function WelcomeScreen() {
   };
 
   const handleGoogleLogin = async () => {
+    playSound('tap');
     setIsSaving(true);
     try {
       const redirectUrl = Linking.createURL('');
-      const { data, error } = await supabase.auth.signInWithOAuth({ 
-        provider: 'google', 
-        options: { redirectTo: redirectUrl, skipBrowserRedirect: true } 
-      });
+      const { data, error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: redirectUrl, skipBrowserRedirect: true } });
       if (error) throw error;
-      
       const res = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
-      
       if (res.type === 'success' && res.url) {
         const urlParams = res.url.split('#')[1]; 
         if (urlParams) {
@@ -125,70 +115,51 @@ function WelcomeScreen() {
                 if (key === 'refresh_token') refresh_token = value;
               }
            });
-
            if (access_token && refresh_token) {
               const { data: sessionData, error: sessionError } = await supabase.auth.setSession({ access_token, refresh_token });
               if (sessionError) throw sessionError;
-              
               const { data: profile } = await supabase.from('profiles').select('username').eq('id', sessionData.session.user.id).single();
-
-              if (profile && profile.username) {
-                 setUsername(profile.username);
-              } else {
-                 setStep('name');
-              }
+              if (profile && profile.username) setUsername(profile.username);
+              else setStep('name');
            }
         }
       }
-    } catch (err) {
-      Alert.alert("Login Error", err.message);
-    } finally {
-      setIsSaving(false); 
-    }
+    } catch (err) { Alert.alert("Login Error", err.message); } 
+    finally { setIsSaving(false); }
   };
 
   const handleGuestPlay = async () => {
-    if (!session) {
-      await supabase.auth.signInAnonymously();
-    }
+    playSound('tap');
+    if (!session) await supabase.auth.signInAnonymously();
     setStep('name');
   };
 
   const handleSubmitName = async () => {
+    playSound('tap');
     if (!nameInput.trim()) return Alert.alert("Required", "Please choose a username!");
     if (!session) return Alert.alert("Wait", "Initializing connection...");
-
     setIsSaving(true);
     const isTaken = await checkIsNameTaken(nameInput.trim());
-    
     if (isTaken) {
       setIsSaving(false);
       return Alert.alert("Taken", "That username is already in use. Try another!");
     }
-
     const { error } = await supabase.from('profiles').upsert({ id: session.user.id, username: nameInput.trim() });
-    
     if (error) Alert.alert("Error", error.message);
     else setUsername(nameInput.trim()); 
-    
     setIsSaving(false);
   };
 
   return (
     <SafeAreaView style={styles.screenContainer}>
       <FallingBackground />
-      
       <View style={{ width: '100%', alignItems: 'center', marginTop: Platform.OS === 'android' ? 40 : 20 }}>
-        <Text style={{ fontSize: 42, fontWeight: '900', color: THEME.text, letterSpacing: 2 }}>
-          PlaceNDigits
-        </Text>
+        <Text style={{ fontSize: 42, fontWeight: '900', color: THEME.text, letterSpacing: 2 }}>PlaceNDigits</Text>
       </View>
-
       <View style={{ flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center', paddingBottom: 60 }}>
         <Text style={{ color: THEME.textDim, marginBottom: 40, fontSize: 16 }}>
            {step === 'initial' ? "Sign in or play as a guest." : "Pick a unique identity to start playing."}
         </Text>
-
         {step === 'initial' ? (
           <View style={{ width: '100%', marginBottom: 30 }}>
             {Platform.OS === 'ios' && (
@@ -198,68 +169,38 @@ function WelcomeScreen() {
                 cornerRadius={16}
                 style={{ width: '100%', height: 55, marginBottom: 15 }}
                 onPress={async () => {
+                  playSound('tap');
                   try {
                     setIsSaving(true);
                     const credential = await AppleAuthentication.signInAsync({
-                      requestedScopes: [
-                        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-                        AppleAuthentication.AppleAuthenticationScope.EMAIL,
-                      ],
+                      requestedScopes: [AppleAuthentication.AppleAuthenticationScope.FULL_NAME, AppleAuthentication.AppleAuthenticationScope.EMAIL],
                     });
-                    
                     if (credential.identityToken) {
-                      const { data, error } = await supabase.auth.signInWithIdToken({
-                        provider: 'apple',
-                        token: credential.identityToken,
-                      });
-
+                      const { data, error } = await supabase.auth.signInWithIdToken({ provider: 'apple', token: credential.identityToken });
                       if (error) throw error;
-
                       const { data: profile } = await supabase.from('profiles').select('username').eq('id', data.session.user.id).single();
-
-                      if (profile && profile.username) {
-                         setUsername(profile.username);
-                      } else {
-                         setStep('name');
-                      }
-                    } else {
-                      throw new Error("No identity token provided by Apple.");
-                    }
-                  } catch (e) {
-                    if (e.code !== 'ERR_REQUEST_CANCELED') {
-                      Alert.alert("Apple Login Error", e.message);
-                    }
-                  } finally {
-                    setIsSaving(false);
-                  }
+                      if (profile && profile.username) setUsername(profile.username);
+                      else setStep('name');
+                    } else { throw new Error("No identity token provided by Apple."); }
+                  } catch (e) { if (e.code !== 'ERR_REQUEST_CANCELED') Alert.alert("Apple Login Error", e.message); } 
+                  finally { setIsSaving(false); }
                 }}
               />
             )}
-
             <TouchableOpacity style={[styles.startButton, { backgroundColor: THEME.google, marginBottom: 15 }]} onPress={handleGoogleLogin}>
               {isSaving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>🌐 Sign in with Google</Text>}
             </TouchableOpacity>
-
             <TouchableOpacity style={[styles.helpButtonLarge, { backgroundColor: THEME.card }]} onPress={handleGuestPlay}>
               <Text style={[styles.btnText, { color: THEME.textDim }]}>Play as Guest</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <View style={{ width: '100%', marginBottom: 30 }}>
-            <TextInput 
-              style={[styles.input, { width: '100%', marginBottom: 20, textAlign: 'center', fontSize: 20 }]} 
-              placeholder="Choose a username" 
-              placeholderTextColor="#777" 
-              value={nameInput} 
-              onChangeText={setNameInput} 
-              autoFocus
-            />
-
+            <TextInput style={[styles.input, { width: '100%', marginBottom: 20, textAlign: 'center', fontSize: 20 }]} placeholder="Choose a username" placeholderTextColor="#777" value={nameInput} onChangeText={setNameInput} autoFocus />
             <TouchableOpacity style={[styles.startButton, { backgroundColor: THEME.success, marginBottom: 15 }]} onPress={handleSubmitName}>
               {isSaving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.btnText}>Continue</Text>}
             </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => setStep('initial')} style={{alignItems: 'center', padding: 10}}>
+            <TouchableOpacity onPress={() => { playSound('tap'); setStep('initial'); }} style={{alignItems: 'center', padding: 10}}>
                 <Text style={{color: THEME.textDim, fontSize: 16}}>← Back</Text>
             </TouchableOpacity>
           </View>
@@ -269,16 +210,19 @@ function WelcomeScreen() {
   );
 }
 
-// ==========================================
-// 2. CUSTOM DRAWER CONTENT
-// ==========================================
+// =====================================================================
+// 🍔 4. SIDE DRAWER MENU (Controls the slide-out navigation)
+// =====================================================================
 function CustomDrawerContent(props) {
   const { username, setUsername } = useContext(UserContext); 
+  const { playSound } = useContext(SoundContext); 
 
   const handleLogOut = async () => {
+    playSound('tap');
     Alert.alert("Log Out", "Are you sure you want to log out?", [
-      { text: "Cancel", style: "cancel" },
+      { text: "Cancel", style: "cancel", onPress: () => playSound('tap') },
       { text: "Log Out", style: "destructive", onPress: async () => {
+          playSound('tap');
           await supabase.auth.signOut(); 
           setUsername(''); 
           await supabase.auth.signInAnonymously(); 
@@ -294,15 +238,32 @@ function CustomDrawerContent(props) {
           <View style={{width: 50, height: 50, borderRadius: 25, backgroundColor: THEME.primary, alignItems: 'center', justifyContent: 'center'}}>
             <Text style={{fontSize: 20, fontWeight: 'bold', color: '#FFF'}}>{username ? username.charAt(0).toUpperCase() : '?'}</Text>
           </View>
-          <View>
-             <Text style={{color: '#FFF', fontSize: 16, fontWeight: 'bold'}}>{username || 'Guest'}</Text>
-          </View>
+          <View><Text style={{color: '#FFF', fontSize: 16, fontWeight: 'bold'}}>{username || 'Guest'}</Text></View>
         </View>
       </SafeAreaView>
-      <DrawerContentScrollView {...props} contentContainerStyle={{paddingTop: 0}}>
-        <DrawerItemList {...props} />
-      </DrawerContentScrollView>
       
+      <DrawerContentScrollView {...props} contentContainerStyle={{paddingTop: 0}}>
+        {/* 👇 THIS IS THE NEW CUSTOM MENU LOOP WITH SOUND 👇 */}
+        {props.state.routes.map((route, index) => {
+          const { options } = props.descriptors[route.key];
+          const isFocused = props.state.index === index;
+          return (
+            <DrawerItem
+              key={route.key}
+              label={options.title || route.name}
+              icon={options.drawerIcon}
+              focused={isFocused}
+              activeTintColor={THEME.primary}
+              inactiveTintColor={THEME.text}
+              onPress={() => {
+                playSound('tap');
+                props.navigation.navigate(route.name);
+              }}
+            />
+          );
+        })}
+      </DrawerContentScrollView>
+
       <View style={{padding: 20, borderTopWidth: 1, borderTopColor: '#333'}}>
         <TouchableOpacity onPress={handleLogOut} style={{flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, marginBottom: 15}}>
           <Ionicons name="log-out-outline" size={24} color={THEME.danger} />
@@ -314,13 +275,14 @@ function CustomDrawerContent(props) {
   );
 }
 
-// ==========================================
-// 3. MAIN GAME SCREEN 
-// ==========================================
+// =====================================================================
+// 🎮 5. THE MAIN GAME SCREEN (Where the magic happens)
+// =====================================================================
 function GameScreen() {
   const { session, username } = useContext(UserContext);
   const navigation = useNavigation();
-  
+  const { isMuted, setIsMuted, playSound } = useContext(SoundContext);
+
   const [difficulty, setDifficulty] = useState(4);
   const [targetNumber, setTargetNumber] = useState('');
   const [currentGuess, setCurrentGuess] = useState('');
@@ -342,6 +304,7 @@ function GameScreen() {
   };
 
   const startGame = async () => {
+    playSound('start');
     const newTarget = generateUniqueNumber(difficulty);
     setTargetNumber(newTarget);
     setGuessesCount(0);
@@ -358,15 +321,18 @@ function GameScreen() {
 
   const handleGuess = async () => {
     if (currentGuess.length !== difficulty) { 
+      playSound('error');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); 
       Alert.alert("Invalid", `Enter ${difficulty} digits.`); 
       return; 
     }
     if (new Set(currentGuess).size !== currentGuess.length) { 
+      playSound('error');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); 
       Alert.alert("Invalid", "Digits must be UNIQUE."); 
       return; 
     }
+    playSound('tap');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const newCount = guessesCount + 1;
     setGuessesCount(newCount);
@@ -382,6 +348,7 @@ function GameScreen() {
     setHistory([{ id: newCount, guess: currentGuess, result: resultMsg }, ...history]);
     setCurrentGuess('');
     if (places === difficulty) {
+      playSound('win');
       clearInterval(gameTimer);
       setIsGameWon(true);
       setGameState('won');
@@ -393,49 +360,50 @@ function GameScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      
-      {/* 👇 FALLING BACKGROUND (Shows on Home OR Win Screen!) 👇 */}
       {(gameState === 'idle' || gameState === 'won') && <FallingBackground />}
-
+      
+      {/* GAME HEADER */}
       <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.headerSideBtn}>
+        <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }} style={styles.headerSideBtn}>
           <Ionicons name="menu" size={32} color={THEME.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>PlaceNDigits</Text>
-        <View style={styles.headerSideBtn} /> 
+        <TouchableOpacity 
+          style={[styles.headerSideBtn, { alignItems: 'flex-end' }]} 
+          onPress={() => {
+            const newMutedState = !isMuted;
+            setIsMuted(newMutedState);
+            if (!newMutedState) playSound('tap', true); // Forces sound to play when unmuting
+          }}
+        >
+          <Ionicons name={isMuted ? "volume-mute" : "volume-high"} size={28} color={isMuted ? THEME.textDim : THEME.primary} />
+        </TouchableOpacity> 
       </View>
 
       {isGameWon && <ConfettiCannon count={200} origin={{x: -10, y: 0}} fadeOut={true} />}
 
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex: 1, paddingHorizontal: 20}}>
         
+        {/* VIEW: MAIN MENU (Idle) */}
         {gameState === 'idle' && (
           <View style={styles.centerContent}>
             <View style={{marginBottom: 30, width: '100%', alignItems: 'center'}}>
-                <Text style={{fontSize: 20, color: THEME.textDim}}>
-                  Welcome, <Text style={{color: THEME.text, fontWeight: 'bold'}}>{username}</Text>
-                </Text>
+                <Text style={{fontSize: 20, color: THEME.textDim}}>Welcome, <Text style={{color: THEME.text, fontWeight: 'bold'}}>{username}</Text></Text>
             </View>
-
             <Text style={styles.label}>Select Difficulty</Text>
             <View style={styles.diffRow}>
               {[3, 4, 5].map(num => (
-                <TouchableOpacity key={num} style={[styles.diffButton, difficulty === num && styles.activeDiff]} onPress={() => setDifficulty(num)}>
+                <TouchableOpacity key={num} style={[styles.diffButton, difficulty === num && styles.activeDiff]} onPress={() => { playSound('tap'); setDifficulty(num); }}>
                   <Text style={[styles.diffText, difficulty === num && styles.activeText]}>{num}</Text>
                 </TouchableOpacity>
               ))}
             </View>
-            
-            <TouchableOpacity style={styles.startButton} onPress={startGame}>
-              <Text style={styles.btnText}>Start Game</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.helpButtonLarge} onPress={() => navigation.navigate('How to Play')}>
-               <Text style={styles.btnText}>❓ How to Play</Text>
-            </TouchableOpacity>
+            <TouchableOpacity style={styles.startButton} onPress={startGame}><Text style={styles.btnText}>Start Game</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.helpButtonLarge} onPress={() => { playSound('tap'); navigation.navigate('How to Play'); }}><Text style={styles.btnText}>❓ How to Play</Text></TouchableOpacity>
           </View>
         )}
 
+        {/* VIEW: ACTIVELY PLAYING */}
         {gameState === 'playing' && (
           <View style={{flex: 1, alignItems: 'center', paddingTop: 20}}>
              <View style={styles.statsRow}>
@@ -444,21 +412,19 @@ function GameScreen() {
               </View>
               <Text style={styles.feedbackLarge}>{feedback}</Text>
               <View style={styles.inputSection}>
-                <TextInput style={styles.gameInput} placeholder="?" placeholderTextColor="#555" keyboardType="numeric" maxLength={difficulty} value={currentGuess} onChangeText={setCurrentGuess} onSubmitEditing={handleGuess} returnKeyType="done" autoFocus />
+                <TextInput style={styles.gameInput} placeholder="?" placeholderTextColor="#555" keyboardType="numeric" maxLength={difficulty} value={currentGuess} onChangeText={(text) => {playSound('type'); setCurrentGuess(text); }} onSubmitEditing={handleGuess} returnKeyType="done" autoFocus />
                 <TouchableOpacity style={styles.guessBtn} onPress={handleGuess}><Text style={styles.btnText}>Go</Text></TouchableOpacity>
               </View>
               <View style={styles.historySectionGame}>
                  <FlatList data={history} keyExtractor={item => item.id.toString()} style={styles.historyList} renderItem={({ item }) => (
-                    <View style={styles.historyRow}>
-                      <Text style={styles.histGuess}>{item.guess}</Text>
-                      <Text style={styles.histResult}>{item.result}</Text>
-                    </View>
+                    <View style={styles.historyRow}><Text style={styles.histGuess}>{item.guess}</Text><Text style={styles.histResult}>{item.result}</Text></View>
                   )} />
               </View>
-              <TouchableOpacity style={styles.quitBtn} onPress={() => { clearInterval(gameTimer); setGameState('idle'); }}><Text style={{color: THEME.danger}}>Quit Game</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.quitBtn} onPress={() => { playSound('tap'); clearInterval(gameTimer); setGameState('idle'); }}><Text style={{color: THEME.danger}}>Quit Game</Text></TouchableOpacity>
           </View>
         )}
 
+        {/* VIEW: GAME WON */}
         {gameState === 'won' && (
            <View style={{alignItems: 'center', marginTop: 40}}>
               <Text style={styles.celebrationText}>HOORAY!</Text>
@@ -471,7 +437,7 @@ function GameScreen() {
               </View>
               <View style={styles.gameOverRow}>
                 <TouchableOpacity style={styles.actionBtn} onPress={startGame}><Text style={styles.btnText}>Play Again</Text></TouchableOpacity>
-                <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#444'}]} onPress={() => setGameState('idle')}><Text style={styles.btnText}>Home</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#444'}]} onPress={() => { playSound('tap'); setGameState('idle'); }}><Text style={styles.btnText}>Home</Text></TouchableOpacity>
               </View>
            </View>
         )}
@@ -480,11 +446,12 @@ function GameScreen() {
   );
 }
 
-// ==========================================
-// 4. OTHER SCREENS 
-// ==========================================
+// =====================================================================
+// 👤 6. PROFILE SCREEN (Account Management & Linking)
+// =====================================================================
 function ProfileScreen() {
   const { session, username, setUsername } = useContext(UserContext);
+  const { playSound } = useContext(SoundContext);
   const [inputText, setInputText] = useState(username || '');
   const [loading, setLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false); 
@@ -496,6 +463,7 @@ function ProfileScreen() {
   useEffect(() => { setInputText(username || ''); }, [username]);
 
   const handleSave = async () => {
+    playSound('tap');
     if (!session || !inputText.trim()) return;
     if (inputText.trim() === username) return setIsEditing(false);
 
@@ -513,22 +481,17 @@ function ProfileScreen() {
     }
   };
   const handleDeleteAccount = () => {
+    playSound('tap');
     Alert.alert(
       "Delete Account",
       "Are you sure you want to permanently delete your account? This action cannot be undone.",
       [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
+        { text: "Cancel", style: "cancel", onPress: () => playSound('tap') },
+        { text: "Delete", style: "destructive", onPress: async () => {
+            playSound('tap');
             const { error } = await supabase.rpc('delete_user');
-            if (error) {
-              Alert.alert("Error deleting account", error.message);
-            } else {
-              await supabase.auth.signOut();
-              setUsername('');
-            }
+            if (error) Alert.alert("Error deleting account", error.message);
+            else { await supabase.auth.signOut(); setUsername(''); }
           }
         }
       ]
@@ -536,17 +499,14 @@ function ProfileScreen() {
   };
 
   const handleLinkGoogle = async () => {
+    playSound('tap');
     setLoading(true);
+    // ... Google OAuth Code (omitted for brevity in comments) ...
     try {
       const redirectUrl = Linking.createURL('');
-      const { data, error } = await supabase.auth.signInWithOAuth({ 
-        provider: 'google', 
-        options: { redirectTo: redirectUrl, skipBrowserRedirect: true } 
-      });
+      const { data, error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: redirectUrl, skipBrowserRedirect: true } });
       if (error) throw error;
-      
       const res = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
-      
       if (res.type === 'success' && res.url) {
         const urlParams = res.url.split('#')[1]; 
         if (urlParams) {
@@ -560,112 +520,72 @@ function ProfileScreen() {
                 if (key === 'refresh_token') refresh_token = value;
               }
            });
-
            if (access_token && refresh_token) {
               const { data: sessionData, error: sessionError } = await supabase.auth.setSession({ access_token, refresh_token });
               if (sessionError) throw sessionError;
-              
               await supabase.from('profiles').upsert({ id: sessionData.session.user.id, username });
               Alert.alert("Success!", "Your Google account has been permanently linked.");
            }
         }
       }
-    } catch (err) {
-      Alert.alert("Link Error", err.message);
-    } finally {
-      setLoading(false); 
-    }
+    } catch (err) { Alert.alert("Link Error", err.message); } 
+    finally { setLoading(false); }
   };
 
   const handleLinkApple = async () => {
+    playSound('tap');
     setLoading(true);
     try {
-      const credential = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-      });
-      
+      const credential = await AppleAuthentication.signInAsync({ requestedScopes: [AppleAuthentication.AppleAuthenticationScope.FULL_NAME, AppleAuthentication.AppleAuthenticationScope.EMAIL] });
       if (credential.identityToken) {
-        const { data, error } = await supabase.auth.signInWithIdToken({
-          provider: 'apple',
-          token: credential.identityToken,
-        });
-
+        const { data, error } = await supabase.auth.signInWithIdToken({ provider: 'apple', token: credential.identityToken });
         if (error) throw error;
-        
         await supabase.from('profiles').upsert({ id: data.session.user.id, username });
         Alert.alert("Success!", "Your Apple account has been permanently linked.");
       }
-    } catch (e) {
-      if (e.code !== 'ERR_REQUEST_CANCELED') {
-        Alert.alert("Link Error", e.message);
-      }
-    } finally {
-      setLoading(false); 
-    }
+    } catch (e) { if (e.code !== 'ERR_REQUEST_CANCELED') Alert.alert("Link Error", e.message); } 
+    finally { setLoading(false); }
   };
 
   return (
     <SafeAreaView style={styles.screenContainer}>
-       <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.backLink}>
-           <Text style={styles.linkText}>☰ Menu</Text>
-       </TouchableOpacity>
+       <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
        <Text style={styles.title}>Profile</Text>
-       
        <Text style={styles.label}>Username</Text>
        
        {isEditing ? (
            <View style={{width: '100%'}}>
                <TextInput style={[styles.input, {width: '100%', marginBottom: 15}]} value={inputText} onChangeText={setInputText} placeholder="Choose a unique username" placeholderTextColor="#666" autoFocus />
-               <TouchableOpacity style={styles.startButton} onPress={handleSave}>
-                   {loading ? <ActivityIndicator color="#FFF"/> : <Text style={styles.btnText}>Save Profile</Text>}
-               </TouchableOpacity>
-               <TouchableOpacity style={[styles.startButton, {backgroundColor: '#444', marginTop: -5}]} onPress={() => {setInputText(username || ''); setIsEditing(false);}}>
-                   <Text style={styles.btnText}>Cancel</Text>
-               </TouchableOpacity>
+               <TouchableOpacity style={styles.startButton} onPress={handleSave}><Text style={styles.btnText}>Save Profile</Text></TouchableOpacity>
+               <TouchableOpacity style={[styles.startButton, {backgroundColor: '#444', marginTop: -5}]} onPress={() => { playSound('tap'); setInputText(username || ''); setIsEditing(false); }}><Text style={styles.btnText}>Cancel</Text></TouchableOpacity>
            </View>
        ) : (
            <View style={{width: '100%', alignItems: 'flex-start'}}>
                <Text style={{fontSize: 24, color: THEME.text, fontWeight: 'bold', marginBottom: 20}}>{username || 'Guest'}</Text>
-               <TouchableOpacity style={[styles.startButton, {backgroundColor: THEME.primary}]} onPress={() => setIsEditing(true)}>
-                   <Text style={styles.btnText}>✏️ Edit Username</Text>
-               </TouchableOpacity>
-
+               <TouchableOpacity style={[styles.startButton, {backgroundColor: THEME.primary}]} onPress={() => { playSound('tap'); setIsEditing(true); }}><Text style={styles.btnText}>✏️ Edit Username</Text></TouchableOpacity>
                {isGuest && (
                  <View style={{ width: '100%', marginTop: 20 }}>
-                   
                    {Platform.OS === 'ios' && (
-                     <AppleAuthentication.AppleAuthenticationButton
-                       buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-                       buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
-                       cornerRadius={16}
-                       style={{ width: '100%', height: 55, marginBottom: 15 }}
-                       onPress={handleLinkApple}
-                     />
+                     <AppleAuthentication.AppleAuthenticationButton buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE} buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE} cornerRadius={16} style={{ width: '100%', height: 55, marginBottom: 15 }} onPress={handleLinkApple} />
                    )}
-
                    <TouchableOpacity style={[styles.startButton, {backgroundColor: THEME.google, marginBottom: 0}]} onPress={handleLinkGoogle}>
                        {loading ? <ActivityIndicator color="#FFF"/> : <Text style={styles.btnText}>🌐 Link Google Account</Text>}
                    </TouchableOpacity>
                  </View>
                )}
-
-               <TouchableOpacity 
-                 style={[styles.startButton, {backgroundColor: 'transparent', borderWidth: 1, borderColor: THEME.danger, marginTop: 40}]} 
-                 onPress={handleDeleteAccount}
-               >
-                   <Text style={[styles.btnText, {color: THEME.danger}]}>🗑️ Delete Account</Text>
-               </TouchableOpacity>
+               <TouchableOpacity style={[styles.startButton, {backgroundColor: 'transparent', borderWidth: 1, borderColor: THEME.danger, marginTop: 40}]} onPress={handleDeleteAccount}><Text style={[styles.btnText, {color: THEME.danger}]}>🗑️ Delete Account</Text></TouchableOpacity>
            </View>
        )}
     </SafeAreaView>
   );
 }
 
+// =====================================================================
+// 🏆 7. LEADERBOARD SCREEN (Global Top 20)
+// =====================================================================
 function LeaderboardScreen() {
   const navigation = useNavigation();
+  const { playSound } = useContext(SoundContext);
   const [leaders, setLeaders] = useState([]);
   const [loading, setLoading] = useState(true); 
   const [difficulty, setDifficulty] = useState(4);
@@ -678,7 +598,6 @@ function LeaderboardScreen() {
     let query = supabase.from('leaderboards').select(`difficulty, time_seconds, guesses_count, profiles!user_id (username)`).eq('difficulty', difficulty);
     if (sortBy === 'time') query = query.order('time_seconds', { ascending: true });
     else query = query.order('guesses_count', { ascending: true });
-    
     const { data } = await query.limit(20);
     if(data) setLeaders(data);
     setLoading(false);
@@ -686,32 +605,32 @@ function LeaderboardScreen() {
 
   return (
     <SafeAreaView style={styles.screenContainer}>
-       <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
+       <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
        <Text style={styles.title}>Global Top 20</Text>
        <View style={styles.diffRow}>
           {[3, 4, 5].map(num => (
-            <TouchableOpacity key={num} style={[styles.diffButton, difficulty === num && styles.activeDiff]} onPress={() => setDifficulty(num)}><Text style={[styles.diffText, difficulty === num && styles.activeText]}>{num}</Text></TouchableOpacity>
+            <TouchableOpacity key={num} style={[styles.diffButton, difficulty === num && styles.activeDiff]} onPress={() => { playSound('tap'); setDifficulty(num); }}><Text style={[styles.diffText, difficulty === num && styles.activeText]}>{num}</Text></TouchableOpacity>
           ))}
        </View>
        <View style={styles.tabRow}>
-         <TouchableOpacity style={[styles.tab, sortBy === 'time' && styles.activeTab]} onPress={() => setSortBy('time')}><Text style={styles.tabText}>Fastest Time ⚡️</Text></TouchableOpacity>
-         <TouchableOpacity style={[styles.tab, sortBy === 'guesses' && styles.activeTab]} onPress={() => setSortBy('guesses')}><Text style={styles.tabText}>Fewest Tries 🎯</Text></TouchableOpacity>
+         <TouchableOpacity style={[styles.tab, sortBy === 'time' && styles.activeTab]} onPress={() => { playSound('tap'); setSortBy('time'); }}><Text style={styles.tabText}>Fastest Time ⚡️</Text></TouchableOpacity>
+         <TouchableOpacity style={[styles.tab, sortBy === 'guesses' && styles.activeTab]} onPress={() => { playSound('tap'); setSortBy('guesses'); }}><Text style={styles.tabText}>Fewest Tries 🎯</Text></TouchableOpacity>
        </View>
        {loading ? <ActivityIndicator color={THEME.primary} size="large" style={{marginTop: 50}} /> : (
            <FlatList data={leaders} keyExtractor={(item, i) => i.toString()} renderItem={({ item, index }) => (
-                 <View style={styles.scoreRow}>
-                    <Text style={styles.rank}>#{index + 1}</Text>
-                    <Text style={styles.name}>{item.profiles ? item.profiles.username : 'Anon'}</Text>
-                    <Text style={styles.scoreVal}>{sortBy === 'time' ? `${item.time_seconds}s` : `${item.guesses_count} tries`}</Text>
-                 </View>
+                 <View style={styles.scoreRow}><Text style={styles.rank}>#{index + 1}</Text><Text style={styles.name}>{item.profiles ? item.profiles.username : 'Anon'}</Text><Text style={styles.scoreVal}>{sortBy === 'time' ? `${item.time_seconds}s` : `${item.guesses_count} tries`}</Text></View>
               )} ListEmptyComponent={<Text style={{color:'#666', textAlign:'center', marginTop:20}}>No scores yet. Be the first!</Text>} />
        )}
     </SafeAreaView>
   );
 }
 
+// =====================================================================
+// 📜 8. HISTORY SCREEN (Personal Log)
+// =====================================================================
 function HistoryScreen() {
   const { session } = useContext(UserContext);
+  const { playSound } = useContext(SoundContext);
   const navigation = useNavigation();
   const [history, setMyHistory] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -727,35 +646,63 @@ function HistoryScreen() {
 
   return (
     <SafeAreaView style={styles.screenContainer}>
-       <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
+       <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
        <Text style={styles.title}>My Game History</Text>
        {!loading && history.length > 0 && (
-         <View style={styles.historyHeaderRow}>
-            <Text style={[styles.historyHeaderText, {width: 30}]}>#</Text>
-            <Text style={[styles.historyHeaderText, {flex: 1, textAlign: 'center'}]}>Difficulty</Text>
-            <Text style={[styles.historyHeaderText, {flex: 1, textAlign: 'center'}]}>Seconds</Text>
-            <Text style={[styles.historyHeaderText, {flex: 1, textAlign: 'center'}]}>Tries</Text>
-         </View>
+         <View style={styles.historyHeaderRow}><Text style={[styles.historyHeaderText, {width: 30}]}>#</Text><Text style={[styles.historyHeaderText, {flex: 1, textAlign: 'center'}]}>Difficulty</Text><Text style={[styles.historyHeaderText, {flex: 1, textAlign: 'center'}]}>Seconds</Text><Text style={[styles.historyHeaderText, {flex: 1, textAlign: 'center'}]}>Tries</Text></View>
        )}
        {loading ? <ActivityIndicator color={THEME.primary} size="large" style={{marginTop: 50}} /> : (
            <FlatList data={history} keyExtractor={item => item.id.toString()} renderItem={({item, index}) => (
-                <View style={styles.historyCardGrid}>
-                   <Text style={styles.historyIndex}>{index + 1}</Text>
-                   <View style={{flex: 1, alignItems: 'center'}}><View style={styles.historyBadge}><Text style={styles.historyBadgeText}>{item.difficulty}</Text></View></View>
-                   <Text style={[styles.historyCardText, {flex: 1, textAlign: 'center'}]}>⏳ {item.time_seconds}s</Text>
-                   <Text style={[styles.historyCardText, {flex: 1, textAlign: 'center'}]}>#️⃣ {item.guesses_count}</Text>
-                </View>
+                <View style={styles.historyCardGrid}><Text style={styles.historyIndex}>{index + 1}</Text><View style={{flex: 1, alignItems: 'center'}}><View style={styles.historyBadge}><Text style={styles.historyBadgeText}>{item.difficulty}</Text></View></View><Text style={[styles.historyCardText, {flex: 1, textAlign: 'center'}]}>⏳ {item.time_seconds}s</Text><Text style={[styles.historyCardText, {flex: 1, textAlign: 'center'}]}>#️⃣ {item.guesses_count}</Text></View>
               )} ListEmptyComponent={<Text style={{color:'#666', textAlign:'center', marginTop:20}}>No games played yet.</Text>} />
        )}
     </SafeAreaView>
   );
 }
 
-function RulesScreen() {
+// =====================================================================
+// ⚙️ 9. SETTINGS SCREEN (App Controls & Mute)
+// =====================================================================
+function SettingsScreen() {
   const navigation = useNavigation();
+  const { isMuted, setIsMuted, playSound } = useContext(SoundContext);
+
+  const toggleSound = () => {
+    const newMutedState = !isMuted;
+    setIsMuted(newMutedState);
+    if (!newMutedState) playSound('tap', true); // Force play sound when turning it BACK ON
+  };
+
   return (
     <SafeAreaView style={styles.screenContainer}>
-        <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
+       <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
+       <Text style={styles.title}>Settings ⚙️</Text>
+       <View style={{ width: '100%', marginTop: 20 }}>
+         <Text style={styles.label}>Audio & Feedback</Text>
+         <View style={[styles.historyRow, { alignItems: 'center' }]}>
+           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+             <Ionicons name={isMuted ? "volume-mute" : "volume-high"} size={24} color={THEME.primary} />
+             <Text style={{ color: THEME.text, fontSize: 18, fontWeight: 'bold' }}>Sound Effects</Text>
+           </View>
+           <TouchableOpacity style={{ paddingHorizontal: 15, paddingVertical: 8, backgroundColor: isMuted ? '#444' : THEME.success, borderRadius: 8 }} onPress={toggleSound}>
+             <Text style={{ color: '#FFF', fontWeight: 'bold' }}>{isMuted ? 'OFF' : 'ON'}</Text>
+           </TouchableOpacity>
+         </View>
+         <Text style={{ color: THEME.textDim, fontSize: 12, marginTop: 5, fontStyle: 'italic' }}>Background music coming in a future update...</Text>
+       </View>
+    </SafeAreaView>
+  );
+}
+
+// =====================================================================
+// 📖 10. RULES & PRIVACY SCREENS
+// =====================================================================
+function RulesScreen() {
+  const navigation = useNavigation();
+  const { playSound } = useContext(SoundContext);
+  return (
+    <SafeAreaView style={styles.screenContainer}>
+        <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
         <Text style={styles.title}>How to Play 🧩</Text>
         <ScrollView>
           <Text style={styles.modalText}>The goal is to guess the hidden secret number.</Text>
@@ -774,10 +721,11 @@ function RulesScreen() {
 
 function PrivacyScreen() {
   const navigation = useNavigation();
-  const openLink = () => { RNLinking.openURL('https://alder-ulna-f96.notion.site/Privacy-Policy-2b738e90ac18808b93a4e98828be9790'); };
+  const { playSound } = useContext(SoundContext);
+  const openLink = () => { playSound('tap'); RNLinking.openURL('https://alder-ulna-f96.notion.site/Privacy-Policy-2b738e90ac18808b93a4e98828be9790'); };
   return (
     <SafeAreaView style={styles.screenContainer}>
-        <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
         <Text style={styles.title}>Privacy Policy</Text>
         <Text style={styles.modalText}>We value your privacy. We do not collect personal data other than the username you provide for the leaderboard.</Text>
         <TouchableOpacity style={styles.startButton} onPress={openLink}><Text style={styles.btnText}>Read Full Policy</Text></TouchableOpacity>
@@ -785,11 +733,9 @@ function PrivacyScreen() {
   );
 }
 
-
-// ==========================================
-// 5. MAIN ARCHITECTURE
-// ==========================================
-
+// =====================================================================
+// 🏗 11. MAIN APP ARCHITECTURE (Navigators & Providers)
+// =====================================================================
 function MainDrawerApp() {
   return (
     <Drawer.Navigator initialRouteName="Home" drawerContent={(props) => <CustomDrawerContent {...props} />} screenOptions={{ headerShown: false, drawerStyle: { backgroundColor: THEME.drawerBg, width: 280 }, drawerActiveTintColor: THEME.primary, drawerInactiveTintColor: THEME.text, sceneContainerStyle: { backgroundColor: THEME.bg } }}>
@@ -797,6 +743,7 @@ function MainDrawerApp() {
       <Drawer.Screen name="Profile" component={ProfileScreen} options={{ drawerIcon: ({color}) => <Ionicons name="person-outline" size={22} color={color} /> }}/>
       <Drawer.Screen name="Leaderboard" component={LeaderboardScreen} options={{ drawerIcon: ({color}) => <Ionicons name="trophy-outline" size={22} color={color} /> }}/>
       <Drawer.Screen name="History" component={HistoryScreen} options={{ drawerIcon: ({color}) => <Ionicons name="time-outline" size={22} color={color} /> }}/>
+      <Drawer.Screen name="Settings" component={SettingsScreen} options={{ drawerIcon: ({color}) => <Ionicons name="settings-outline" size={22} color={color} /> }}/>
       <Drawer.Screen name="How to Play" component={RulesScreen} options={{ drawerIcon: ({color}) => <Ionicons name="help-circle-outline" size={22} color={color} /> }}/>
       <Drawer.Screen name="Privacy" component={PrivacyScreen} options={{ drawerIcon: ({color}) => <Ionicons name="lock-closed-outline" size={22} color={color} /> }}/>
     </Drawer.Navigator>
@@ -812,25 +759,17 @@ export default function App() {
     const initApp = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       setSession(session);
-      
-      if (session) {
-        await fetchProfile(session.user.id);
-      } else {
-        await supabase.auth.signInAnonymously();
-      }
+      if (session) await fetchProfile(session.user.id);
+      else await supabase.auth.signInAnonymously();
       setIsAppReady(true); 
     };
-    
     initApp();
 
     const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
       if (session) fetchProfile(session.user.id);
     });
-
-    return () => {
-      authListener.subscription.unsubscribe();
-    };
+    return () => { authListener.subscription.unsubscribe(); };
   }, []);
 
   const fetchProfile = async (userId) => {
@@ -838,33 +777,27 @@ export default function App() {
     if (data) setUsername(data.username);
   };
 
-  if (!isAppReady) {
-    return <View style={{ flex: 1, backgroundColor: THEME.bg }} />;
-  }
+  if (!isAppReady) return <View style={{ flex: 1, backgroundColor: THEME.bg }} />;
 
   return (
     <SafeAreaProvider>
-      <UserContext.Provider value={{ session, username, setUsername, fetchProfile }}>
-        <NavigationContainer>
-          <StatusBar barStyle="light-content" />
-          
-          <Stack.Navigator screenOptions={{ headerShown: false }}>
-            {!username ? (
-              <Stack.Screen name="Welcome" component={WelcomeScreen} />
-            ) : (
-              <Stack.Screen name="Main" component={MainDrawerApp} />
-            )}
-          </Stack.Navigator>
-
-        </NavigationContainer>
-      </UserContext.Provider>
+      <SoundProvider>
+        <UserContext.Provider value={{ session, username, setUsername, fetchProfile }}>
+          <NavigationContainer>
+            <StatusBar barStyle="light-content" />
+            <Stack.Navigator screenOptions={{ headerShown: false }}>
+              {!username ? ( <Stack.Screen name="Welcome" component={WelcomeScreen} /> ) : ( <Stack.Screen name="Main" component={MainDrawerApp} /> )}
+            </Stack.Navigator>
+          </NavigationContainer>
+        </UserContext.Provider>
+      </SoundProvider>
     </SafeAreaProvider>
   );
 }
 
-// ==========================================
-// 6. STYLES
-// ==========================================
+// =====================================================================
+// 🎨 12. STYLES (UI Definitions)
+// =====================================================================
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: THEME.bg },
   screenContainer: { flex: 1, backgroundColor: THEME.bg, padding: 20 },
