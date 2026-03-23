@@ -358,6 +358,22 @@ function GameScreen() {
     }
   };
 
+  const handleQuitGame = () => {
+    playSound('tap');
+    Alert.alert(
+      "Give Up?",
+      "Are you sure you want to quit? This will reset your current progress.",
+      [
+        { text: "Keep Playing", style: "cancel", onPress: () => playSound('tap') },
+        { text: "Quit", style: "destructive", onPress: () => {
+            playSound('tap');
+            clearInterval(gameTimer);
+            setGameState('idle');
+        }}
+      ]
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {(gameState === 'idle' || gameState === 'won') && <FallingBackground />}
@@ -420,7 +436,9 @@ function GameScreen() {
                     <View style={styles.historyRow}><Text style={styles.histGuess}>{item.guess}</Text><Text style={styles.histResult}>{item.result}</Text></View>
                   )} />
               </View>
-              <TouchableOpacity style={styles.quitBtn} onPress={() => { playSound('tap'); clearInterval(gameTimer); setGameState('idle'); }}><Text style={{color: THEME.danger}}>Quit Game</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.quitBtn} onPress={handleQuitGame}>
+                <Text style={{color: THEME.danger}}>Quit Game</Text>
+              </TouchableOpacity>
           </View>
         )}
 
@@ -501,7 +519,6 @@ function ProfileScreen() {
   const handleLinkGoogle = async () => {
     playSound('tap');
     setLoading(true);
-    // ... Google OAuth Code (omitted for brevity in comments) ...
     try {
       const redirectUrl = Linking.createURL('');
       const { data, error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: redirectUrl, skipBrowserRedirect: true } });
@@ -549,7 +566,15 @@ function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.screenContainer}>
-       <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
+       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+           <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }}>
+               <Text style={styles.linkText}>☰ Menu</Text>
+           </TouchableOpacity>
+           
+           <TouchableOpacity onPress={() => { playSound('tap'); navigation.navigate('Home'); }}>
+               <Ionicons name="home" size={28} color={THEME.primary} />
+           </TouchableOpacity>
+       </View>
        <Text style={styles.title}>Profile</Text>
        <Text style={styles.label}>Username</Text>
        
@@ -605,7 +630,15 @@ function LeaderboardScreen() {
 
   return (
     <SafeAreaView style={styles.screenContainer}>
-       <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
+       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+           <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }}>
+               <Text style={styles.linkText}>☰ Menu</Text>
+           </TouchableOpacity>
+           
+           <TouchableOpacity onPress={() => { playSound('tap'); navigation.navigate('Home'); }}>
+               <Ionicons name="home" size={28} color={THEME.primary} />
+           </TouchableOpacity>
+       </View>
        <Text style={styles.title}>Global Top 20</Text>
        <View style={styles.diffRow}>
           {[3, 4, 5].map(num => (
@@ -646,7 +679,15 @@ function HistoryScreen() {
 
   return (
     <SafeAreaView style={styles.screenContainer}>
-       <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
+       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+           <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }}>
+               <Text style={styles.linkText}>☰ Menu</Text>
+           </TouchableOpacity>
+           
+           <TouchableOpacity onPress={() => { playSound('tap'); navigation.navigate('Home'); }}>
+               <Ionicons name="home" size={28} color={THEME.primary} />
+           </TouchableOpacity>
+       </View>
        <Text style={styles.title}>My Game History</Text>
        {!loading && history.length > 0 && (
          <View style={styles.historyHeaderRow}><Text style={[styles.historyHeaderText, {width: 30}]}>#</Text><Text style={[styles.historyHeaderText, {flex: 1, textAlign: 'center'}]}>Difficulty</Text><Text style={[styles.historyHeaderText, {flex: 1, textAlign: 'center'}]}>Seconds</Text><Text style={[styles.historyHeaderText, {flex: 1, textAlign: 'center'}]}>Tries</Text></View>
@@ -675,7 +716,15 @@ function SettingsScreen() {
 
   return (
     <SafeAreaView style={styles.screenContainer}>
-       <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
+       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+           <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }}>
+               <Text style={styles.linkText}>☰ Menu</Text>
+           </TouchableOpacity>
+           
+           <TouchableOpacity onPress={() => { playSound('tap'); navigation.navigate('Home'); }}>
+               <Ionicons name="home" size={28} color={THEME.primary} />
+           </TouchableOpacity>
+       </View>
        <Text style={styles.title}>Settings ⚙️</Text>
        <View style={{ width: '100%', marginTop: 20 }}>
          <Text style={styles.label}>Audio & Feedback</Text>
@@ -700,33 +749,94 @@ function SettingsScreen() {
 function RulesScreen() {
   const navigation = useNavigation();
   const { playSound } = useContext(SoundContext);
+  
   return (
     <SafeAreaView style={styles.screenContainer}>
-        <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
+        {/* HEADER */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+           <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }}>
+               <Text style={styles.linkText}>☰ Menu</Text>
+           </TouchableOpacity>
+           
+           <TouchableOpacity onPress={() => { playSound('tap'); navigation.navigate('Home'); }}>
+               <Ionicons name="home" size={28} color={THEME.primary} />
+           </TouchableOpacity>
+        </View>
+
         <Text style={styles.title}>How to Play 🧩</Text>
-        <ScrollView>
-          <Text style={styles.modalText}>The goal is to guess the hidden secret number.</Text>
+        
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+          <Text style={styles.modalText}>The goal is to guess the hidden secret number in the fewest tries possible.</Text>
+          
           <Text style={styles.ruleHeader}>1. The Rules</Text>
-          <Text style={styles.modalText}>• All digits are <Text style={{fontWeight:'bold'}}>UNIQUE</Text>.</Text>
+          <Text style={styles.modalText}>• All digits are <Text style={{fontWeight:'bold', color: '#FFF'}}>UNIQUE</Text> (no repeats like 1122).</Text>
           <Text style={styles.modalText}>• Digits are between 0-9.</Text>
+          
           <Text style={styles.ruleHeader}>2. The Feedback</Text>
           <View style={styles.exampleBox}>
-            <Text style={styles.exampleText}>🟢 <Text style={{color: THEME.success}}>PLACE:</Text> Right number, Right spot.</Text>
-            <Text style={styles.exampleText}>🟡 <Text style={{color: THEME.gold}}>DIGIT:</Text> Right number, Wrong spot.</Text>
+            <Text style={styles.exampleText}>🟢 <Text style={{color: THEME.success, fontWeight: 'bold'}}>PLACE:</Text> Right number, Right spot.</Text>
+            <Text style={styles.exampleText}>🟡 <Text style={{color: THEME.gold, fontWeight: 'bold'}}>DIGIT:</Text> Right number, Wrong spot.</Text>
           </View>
+
+          <Text style={styles.ruleHeader}>3. Example Game</Text>
+          <Text style={styles.modalText}>Imagine the secret 4-digit number is <Text style={{fontWeight:'bold', color: THEME.primary, letterSpacing: 2}}> 4271</Text>.</Text>
+          
+          {/* GUESS 1 */}
+          <View style={[styles.historyRow, { marginTop: 10 }]}>
+            <Text style={styles.histGuess}>4890</Text>
+            <Text style={styles.histResult}>1 Place  0 Digit</Text>
+          </View>
+          <Text style={{color: THEME.textDim, fontSize: 13, marginBottom: 15, paddingHorizontal: 5}}>
+            (The '4' is the right number in the right spot!)
+          </Text>
+
+          {/* GUESS 2 */}
+          <View style={styles.historyRow}>
+            <Text style={styles.histGuess}>2579</Text>
+            <Text style={styles.histResult}>1 Place  1 Digit</Text>
+          </View>
+          <Text style={{color: THEME.textDim, fontSize: 13, marginBottom: 15, paddingHorizontal: 5}}>
+            (The '7' is in the right spot. The '2' is in the secret number, but in the wrong spot.)
+          </Text>
+
+          {/* GUESS 3 */}
+          <View style={styles.historyRow}>
+            <Text style={styles.histGuess}>1724</Text>
+            <Text style={styles.histResult}>0 Place  4 Digit</Text>
+          </View>
+          <Text style={{color: THEME.textDim, fontSize: 13, marginBottom: 15, paddingHorizontal: 5}}>
+            (You found all the right numbers, but they are all in the wrong order!)
+          </Text>
+
+          {/* WINNING GUESS */}
+          <View style={[styles.historyRow, { borderColor: THEME.success, borderWidth: 1 }]}>
+            <Text style={styles.histGuess}>4271</Text>
+            <Text style={[styles.histResult, {color: THEME.success, fontWeight: 'bold'}]}>4 Place  0 Digit</Text>
+          </View>
+          <Text style={{color: THEME.success, fontSize: 16, fontWeight: 'bold', marginBottom: 15, textAlign: 'center', marginTop: 5}}>
+            🎉 YOU WIN! 🎉
+          </Text>
+
         </ScrollView>
     </SafeAreaView>
   );
 }
-
 function PrivacyScreen() {
   const navigation = useNavigation();
   const { playSound } = useContext(SoundContext);
   const openLink = () => { playSound('tap'); RNLinking.openURL('https://alder-ulna-f96.notion.site/Privacy-Policy-2b738e90ac18808b93a4e98828be9790'); };
   return (
     <SafeAreaView style={styles.screenContainer}>
-        <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }} style={styles.backLink}><Text style={styles.linkText}>☰ Menu</Text></TouchableOpacity>
-        <Text style={styles.title}>Privacy Policy</Text>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+           <TouchableOpacity onPress={() => { playSound('tap'); navigation.openDrawer(); }}>
+               <Text style={styles.linkText}>☰ Menu</Text>
+           </TouchableOpacity>
+           
+           <TouchableOpacity onPress={() => { playSound('tap'); navigation.navigate('Home'); }}>
+               <Ionicons name="home" size={28} color={THEME.primary} />
+           </TouchableOpacity>
+       </View>
+       <Text style={styles.title}>Privacy Policy</Text>
         <Text style={styles.modalText}>We value your privacy. We do not collect personal data other than the username you provide for the leaderboard.</Text>
         <TouchableOpacity style={styles.startButton} onPress={openLink}><Text style={styles.btnText}>Read Full Policy</Text></TouchableOpacity>
     </SafeAreaView>
